@@ -2,13 +2,25 @@
 #include <Arduino.h>
 #include "Arduino_BMI270_BMM150.h"
 #include <Smoothed.h>
+#include <Servo.h>
 
-#define VZ_TH  1.0f
+
+#define VZ_TH  0.3f
+#define VZ_TH_MOVE  1.0f
+
+
+//****************************************************** SERVO STUFF ******************************************************
+
+Servo myservo;
+
+int pos = 0;    // variable to store the servo position
+
 
 //****************************************************** FILTERS STUFF ******************************************************
 
 Smoothed <float> smoothingCurrentFilter;
 void motor_stop();
+void motor_move(uint8_t direction, uint8_t speed=255);
 void activeBreak();
 void deactiveBreak();
 
@@ -79,6 +91,8 @@ private:
 StartupState startupState;
 BrakedState brakedState;
 UnbrakedState unbrakedState;
+OpeningState openingState;
+ClosingState closingState;
 
 State *_state = &startupState;
 State *_lastState = nullptr;
@@ -88,15 +102,15 @@ State *_lastState = nullptr;
 void StartupState::enter()
 {
     // AUTO Calibration
-    delay(1000);
+    // delay(1000);
     Serial.println("StartupState::enter");
-    delay(1000);
+    // delay(1000);
 }
 
 State* StartupState::run()
 {
     Serial.println("StartupState::run");
-    delay(1000);
+    // delay(1000);
     // Start filter
     smoothingCurrentFilter.begin(SMOOTHED_AVERAGE, 100);
 
@@ -139,6 +153,7 @@ unsigned long autoBreak_timer;
 void UnbrakedState::enter() {
     Serial.println("UnBrakedState::enter");
     autoBreak_timer = millis();
+    deactiveBreak();
 }
 
 State* UnbrakedState::run() {
@@ -155,6 +170,58 @@ State* UnbrakedState::run() {
 }
 
 
+unsigned long movement_timer;
+void OpeningState::enter() {
+    Serial.println("OpeningState::enter");
+    deactiveBreak();
+    motor_move(0);
+    movement_timer = millis();
+}
+
+State* OpeningState::run() {
+    if (IMU.gyroscopeAvailable()) {
+        IMU.readGyroscope(x, y, z);
+        if(abs(z) > VZ_TH_MOVE) {
+            autoBreak_timer = millis();
+        }
+    }
+    if (millis() - movement_timer > 2000) {
+        return &brakedState;
+    }
+    return this;
+}
+
+void OpeningState::exit() {
+    Serial.println("OpeningState::exit");
+    motor_stop();
+}
+
+
+void ClosingState::enter() {
+    Serial.println("ClosingState::enter");
+    deactiveBreak();
+    motor_move(1);
+    movement_timer = millis();
+}
+
+State* ClosingState::run() {
+    if (IMU.gyroscopeAvailable()) {
+        IMU.readGyroscope(x, y, z);
+        if(abs(z) > VZ_TH_MOVE) {
+            autoBreak_timer = millis();
+        }
+    }
+    if (millis() - movement_timer > 2000) {
+        return &brakedState;
+    }
+    return this;
+}
+
+void ClosingState::exit() {
+    Serial.println("ClosingState::exit");
+    motor_stop();
+}
+
 //****************************************************** MOTOR & BREAKE STUFF ******************************************************
 
 void motor_stop(){
@@ -162,12 +229,28 @@ void motor_stop(){
     digitalWrite(MOTOR_PIN2, LOW);
 }
 
+void motor_move(uint8_t direction, uint8_t speed) {
+    if(direction) {
+        digitalWrite(MOTOR_PIN1, HIGH);
+        digitalWrite(MOTOR_PIN2, LOW);
+    } else {
+        digitalWrite(MOTOR_PIN1, LOW);
+        digitalWrite(MOTOR_PIN2, HIGH);
+    }
+}
+
 void activeBreak() {
     // Move servo so breaking position
+    // for (pos = 0; pos <= 180; pos += 1) { // goes from 0 degrees to 180 degrees
+        // in steps of 1 degree
+        myservo.write(160);              // tell servo to go to position in variable 'pos'
+    // }
 }
 
 void deactiveBreak() {
     // Move servo to free position
+    // for (pos = 180; pos >= 0; pos -= 1) { // goes from 180 degrees to 0 degrees
+        myservo.write(20);              // tell servo to go to position in variable 'pos'
 }
 
 //****************************************************** ARDUINO STUFF ******************************************************
@@ -176,6 +259,10 @@ void setup(){
     Serial.begin(9600);
     pinMode(MOTOR_PIN1, OUTPUT);
     pinMode(MOTOR_PIN2, OUTPUT);
+    pinMode(MOTOR_PIN2, OUTPUT);
+    pinMode(SERVO_PIN, OUTPUT);
+
+    myservo.attach(SERVO_PIN);
     digitalWrite(LED_BUILTIN, LOW);
 }
 
