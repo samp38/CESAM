@@ -9,3 +9,5 @@
   * break
   * free
 * build for Android
+
+<img src="../doc/app-preview.jpg" width="300">
