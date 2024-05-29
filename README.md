@@ -22,3 +22,9 @@ Antoine
 ## Firmware
 ### States & transitions
 ![stateMachine](doc/stateMachine.drawio.svg)
+
+## Hardware
+* motor with reducer and wheel
+* arduino nano 33 ble
+* H-Bridge (L293D or DRV8838 or anything else)
+* Voltage regulator
