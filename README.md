@@ -1,15 +1,5 @@
-# CESAM
+<p align="center"><img src="doc/logoCESAM.png" height="300"></p>
 Simple, connected and reliable indoor Door Opening Device.
-
-participants
-Porteur projet : Vincent Pour son fils Hugo
-
-Gabriel  
-Lucie  
-Clotilde  
-Koji  
-Samuel
-Antoine
 
 ## Features
 * indoor door open and close action with motor
