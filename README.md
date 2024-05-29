@@ -1,23 +1,22 @@
 # CESAM
-Door Opening Device
+Simple, connected and reliable indoor Door Opening Device.
 
 participants
 Porteur projet : Vincent Pour son fils Hugo
 
-Gabriel
-Lucie
-Clotilde
-Koji
-SAmuel
+Gabriel  
+Lucie  
+Clotilde  
+Koji  
+Samuel
 Antoine
 
-Design nécessaire
-Actionneur 
-Embrayage
-Capteur ouverture manuel
-Fin de Course
-RF (Commande)
+## FEATURES
+* indoor door open and close action with motor
+* brake that can be released to allow manual door operation
+* full features BlueTooth LowEnergy app to control door(s)
+* automatic breake release on door manual movement
+* door speed and current monitoring to avoid motor overheating
 
-Fonctionnalités attendues : ouvrir / fermer / bloquer une porte électroniquement tout en conservant la possibilité de l'ouvrir la Fermer et la bloquer manuellement
 
 
