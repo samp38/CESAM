@@ -3,10 +3,20 @@
 #include "Arduino_BMI270_BMM150.h"
 #include <Smoothed.h>
 #include <Servo.h>
+#include <ArduinoBLE.h>
 
 
-#define VZ_TH  0.3f
+#define VZ_TH  2.0f
 #define VZ_TH_MOVE  1.0f
+
+
+//****************************************************** BLE STUFF ******************************************************
+
+BLEService doorService("19B10010-E8F2-537E-4F6C-D104768A1214"); // create service
+
+// create switch characteristic and allow remote device to read and write
+BLEByteCharacteristic doorCharacteristic("19B10011-E8F2-537E-4F6C-D104768A1214", BLERead | BLEWrite);
+
 
 
 //****************************************************** SERVO STUFF ******************************************************
@@ -129,6 +139,32 @@ State* StartupState::run()
     // Stop MOTOR
     motor_stop();
 
+
+    // START BLE
+    if (!BLE.begin()) {
+    Serial.println("starting Bluetooth® Low Energy module failed!");
+
+    while (1);
+    }
+
+    // set the local name peripheral advertises
+    BLE.setLocalName("CESAM");
+    // set the UUID for the service this peripheral advertises:
+    BLE.setAdvertisedService(doorService);
+
+    // add the characteristics to the service
+    doorService.addCharacteristic(doorCharacteristic);
+
+    // add the service
+    BLE.addService(doorService);
+
+    doorCharacteristic.writeValue(0);
+
+    // start advertising
+    BLE.advertise();
+
+    Serial.println("Bluetooth® device active, waiting for connections...");
+
     return &brakedState;
 }
 
@@ -136,13 +172,24 @@ void BrakedState::enter() {
     Serial.println("BrakedState::enter");
     motor_stop();
     activeBreak();
+    delay(1000);
 }
 
 State* BrakedState::run() {
+    // listen for Bluetooth® Low Energy peripherals to connect:
+    BLEDevice central = BLE.central();
+    if (doorCharacteristic.written()) {
+        Serial.println(doorCharacteristic.value());
+        if (doorCharacteristic.value() == 0 ) {
+            return &openingState;
+        } else {
+            return &closingState;
+        }
+    }
     // Here we check gyrovalues. If we detect a move, we make the door free
     if (IMU.gyroscopeAvailable()) {
         IMU.readGyroscope(x, y, z);
-        if(abs(z) > 1.) {
+        if(abs(y) > 3.) {
             return &unbrakedState;
         }
     }
@@ -159,7 +206,7 @@ void UnbrakedState::enter() {
 State* UnbrakedState::run() {
     if (IMU.gyroscopeAvailable()) {
         IMU.readGyroscope(x, y, z);
-        if(abs(z) > VZ_TH) {
+        if(abs(y) > VZ_TH) {
             autoBreak_timer = millis();
         }
     }
@@ -181,11 +228,11 @@ void OpeningState::enter() {
 State* OpeningState::run() {
     if (IMU.gyroscopeAvailable()) {
         IMU.readGyroscope(x, y, z);
-        if(abs(z) > VZ_TH_MOVE) {
-            autoBreak_timer = millis();
+        if(abs(y) > VZ_TH_MOVE) {
+            movement_timer = millis();
         }
     }
-    if (millis() - movement_timer > 2000) {
+    if (millis() - movement_timer > 1000) {
         return &brakedState;
     }
     return this;
@@ -207,11 +254,11 @@ void ClosingState::enter() {
 State* ClosingState::run() {
     if (IMU.gyroscopeAvailable()) {
         IMU.readGyroscope(x, y, z);
-        if(abs(z) > VZ_TH_MOVE) {
-            autoBreak_timer = millis();
+        if(abs(y) > VZ_TH_MOVE) {
+            movement_timer = millis();
         }
     }
-    if (millis() - movement_timer > 2000) {
+    if (millis() - movement_timer > 1000) {
         return &brakedState;
     }
     return this;
@@ -243,14 +290,14 @@ void activeBreak() {
     // Move servo so breaking position
     // for (pos = 0; pos <= 180; pos += 1) { // goes from 0 degrees to 180 degrees
         // in steps of 1 degree
-        myservo.write(160);              // tell servo to go to position in variable 'pos'
+        myservo.write(75);              // tell servo to go to position in variable 'pos'
     // }
 }
 
 void deactiveBreak() {
     // Move servo to free position
     // for (pos = 180; pos >= 0; pos -= 1) { // goes from 180 degrees to 0 degrees
-        myservo.write(20);              // tell servo to go to position in variable 'pos'
+        myservo.write(30);              // tell servo to go to position in variable 'pos'
 }
 
 //****************************************************** ARDUINO STUFF ******************************************************
