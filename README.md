@@ -11,7 +11,7 @@ Koji
 Samuel
 Antoine
 
-## FEATURES
+## Features
 * indoor door open and close action with motor
 * brake that can be released to allow manual door operation
 * full features BlueTooth LowEnergy app to control door(s)
@@ -19,4 +19,6 @@ Antoine
 * door speed and current monitoring to avoid motor overheating
 
 
-
+## Firmware
+### States & transitions
+![stateMachine](doc/stateMachine.drawio.svg)
