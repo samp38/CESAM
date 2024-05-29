@@ -1,9 +1,12 @@
 #include <bsp.h>
 #include <Arduino.h>
+#ifdef NANO_33_BLE
 #include "Arduino_BMI270_BMM150.h"
-#include <Smoothed.h>
 #include <Servo.h>
 #include <ArduinoBLE.h>
+#elif FEATHER_SENSE
+
+#endif
 
 
 #define VZ_TH  2.0f
@@ -28,7 +31,6 @@ int pos = 0;    // variable to store the servo position
 
 //****************************************************** FILTERS STUFF ******************************************************
 
-Smoothed <float> smoothingCurrentFilter;
 void motor_stop();
 void motor_move(uint8_t direction, uint8_t speed=255);
 void activeBreak();
@@ -122,7 +124,6 @@ State* StartupState::run()
     Serial.println("StartupState::run");
     // delay(1000);
     // Start filter
-    smoothingCurrentFilter.begin(SMOOTHED_AVERAGE, 100);
 
     // Start IMU
     if (!IMU.begin()) {
@@ -180,9 +181,9 @@ State* BrakedState::run() {
     BLEDevice central = BLE.central();
     if (doorCharacteristic.written()) {
         Serial.println(doorCharacteristic.value());
-        if (doorCharacteristic.value() == 0 ) {
+        if (doorCharacteristic.value() == 48 ) {
             return &openingState;
-        } else {
+        } else if(doorCharacteristic.value() == 49) {
             return &closingState;
         }
     }
