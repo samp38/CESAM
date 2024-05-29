@@ -28,3 +28,5 @@ Antoine
 * arduino nano 33 ble
 * H-Bridge (L293D or DRV8838 or anything else)
 * Voltage regulator
+
+![schema-elec](doc/schema-elec.png)
