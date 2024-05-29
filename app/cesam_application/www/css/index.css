@@ -1,0 +1,191 @@
+*{
+    -webkit-tap-highlight-color: rgba(0,0,0,0); /* make transparent link selection, adjust last value opacity 0 to 1.0 */
+}
+
+body
+{
+
+    -webkit-touch-callout: none;                /* prevent callout to copy image, etc when tap to hold */
+    -webkit-text-size-adjust: none;             /* prevent webkit from resizing text to fit */
+    -webkit-user-select: none;                  /* prevent copy paste, to allow, change 'none' to 'text' */
+    background-color:#222;
+    font-family: system-ui, -apple-system, -apple-system-font, 'Segoe UI', 'Roboto', sans-serif;
+    font-size:12px;
+    color: #EEE;
+    height:100vh;
+    margin:0px;
+    padding:0px;
+    width:100%;
+    text-align: center
+}
+
+h2
+{
+    margin: 2% 5%;
+}
+
+ul
+{
+    text-align: left;
+}
+
+input[type="range"]
+{
+    width: 90%;
+    margin-top: 4%;
+    margin-bottom: 2%;
+}
+
+button
+{
+    width: 9.5em;
+    height: 2em;
+    border: none;
+    border-radius: 4px;
+    margin: 5% 2%;
+}
+
+#clearButtondebug
+{
+    width: 13em;
+}
+
+.connection
+{
+    font-weight: bold;
+    color: #C46310;
+}
+
+.connected
+{
+    font-weight: bold;
+    color: green;
+}
+
+#iconbattery
+{
+    height: 11px;
+    margin: 0% 0% -0.3% 0%;
+}
+
+#battery
+{
+    position:absolute;
+    right:5%;
+    top:2%;
+    opacity:0;
+ }
+
+.command
+{
+    margin:4% 5%;
+    padding:2%;
+    background-color:#303030;
+    border-radius:5%;
+    max-width:90%;
+}
+
+.outputData > div
+{
+    text-align: left;
+    margin-left: 5%;
+}
+
+.outputData > div > div:first-child
+{
+    display: inline-block;
+    text-align: left;
+    width: 5em;
+}
+
+#index
+{
+    position:absolute;
+    height:100%;
+    width:100%;
+    background-color:#222;
+    bottom:0; left:0;
+}
+
+#logoindex
+{
+    position:absolute;
+    width:50%;
+    bottom:35%;
+    left:25%;
+}
+
+#logo
+{
+    width:15%;
+}
+
+
+.blink
+{
+  animation-duration: 1.5s;
+  animation-name: blink;
+  animation-iteration-count:infinite;
+  animation-fill-mode:backwards;
+  animation-direction:alternate;
+  animation-timing-function:linear;
+}
+
+@keyframes blink
+{
+  from
+  {
+    opacity :1;
+    color:red;
+  }
+
+  to
+  {
+    opacity :0;
+  }
+}
+
+.FadeIn
+{
+  animation-duration: 0.3s;
+  animation-name: FadeIn;
+  animation-fill-mode:forwards;
+  animation-timing-function:linear;
+}
+
+@keyframes FadeIn
+{
+  from
+  {
+    opacity :0;
+  }
+
+  to
+  {
+    opacity :1;
+  }
+}
+
+.btnhighlight
+{
+  animation-duration: 0.3s;
+  animation-name: btnhighlight;
+  animation-fill-mode:forwards;
+  animation-timing-function:linear;
+}
+
+@keyframes btnhighlight
+{
+  from
+  {
+  background-color: #EEE;
+  }
+  to
+  {
+    background-color: #c46310;
+  }
+}
+
+button:active{
+   background-color:#c46310;
+}

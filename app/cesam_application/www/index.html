@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <!--
+    Customize this policy to fit your own app's needs. For more guidance, see:
+        https://github.com/apache/cordova-plugin-whitelist/blob/master/README.md#content-security-policy
+    Some notes:
+        * gap: is required only on iOS (when using UIWebView) and is needed for JS->native communication
+        * https://ssl.gstatic.com is required only on Android and is needed for TalkBack to function properly
+        * Disables use of inline scripts in order to mitigate risk of XSS vulnerabilities. To change this:
+            * Enable inline JS: add 'unsafe-inline' to default-src
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: gap: https://ssl.gstatic.com 'unsafe-eval'; style-src 'self' 'unsafe-inline'; media-src *; img-src 'self' data: content:;">
+    <meta name="format-detection" content="telephone=no">
+    <meta name="msapplication-tap-highlight" content="no">
+    <meta name="viewport" content="initial-scale=1, width=device-width, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
+    <link rel="stylesheet" href="css/index.css">
+    <title>Exofinger</title>
+</head>
+<body>
+<div class="commandsinterface">
+    <img id="logo" src="img/logoCESAM.png"/>
+    <div class="outputData" id="battery"><span id="batterylevel"></span> <img id="iconbattery" src="img/iconbattery.png"/></div>
+    <h2>Appareils disponibles</h2>
+    <div id="bluetooth">
+        <ul id="deviceList"></ul>
+        <button id="refreshButton">Rafraîchir</button>
+        <button id="disconnectButton">Déconnecter</button>
+    </div>
+    <div>
+
+        <h2>Commande</h2>
+        <div class="command">
+            <div class="outputData">Position : <span id="position"></span></div>
+            <button id="openButton">Ouvrir</button>
+            <button id="closeButton">Fermer</button>
+        </div>
+    </div>
+</div>
+
+<div id="index">
+    <img id="logoindex" src="img/logoCESAM.png"/>
+</div>
+
+
+<script src="cordova.js"></script>
+<script src="js/jquery-3.6.0.min.js"></script>
+<script src="js/index.js"></script>
+
+</body>
+</html>
+
