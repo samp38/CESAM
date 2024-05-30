@@ -99,6 +99,7 @@ private:
     uint64_t _lastProcessTime;
 };
 
+State* check_bt_command();
 
 StartupState startupState;
 BrakedState brakedState;
@@ -177,14 +178,9 @@ void BrakedState::enter() {
 }
 
 State* BrakedState::run() {
-    // listen for Bluetooth® Low Energy peripherals to connect:
-    BLEDevice central = BLE.central();
-    if (doorCharacteristic.written()) {
-        if (doorCharacteristic.value() == 48 ) {
-            return &openingState;
-        } else if(doorCharacteristic.value() == 49) {
-            return &closingState;
-        }
+    State* bt_next_state = check_bt_command();
+    if (bt_next_state != nullptr) {
+        return bt_next_state;
     }
     // Here we check gyrovalues. If we detect a move, we make the door free
     if (IMU.gyroscopeAvailable()) {
@@ -204,6 +200,10 @@ void UnbrakedState::enter() {
 }
 
 State* UnbrakedState::run() {
+    State* bt_next_state = check_bt_command();
+    if (bt_next_state != nullptr) {
+        return bt_next_state;
+    }
     if (IMU.gyroscopeAvailable()) {
         IMU.readGyroscope(x, y, z);
         if(abs(y) > VZ_TH) {
@@ -227,6 +227,10 @@ void OpeningState::enter() {
 }
 
 State* OpeningState::run() {
+    State* bt_next_state = check_bt_command();
+    if (bt_next_state != nullptr) {
+        return bt_next_state;
+    }
     if (IMU.gyroscopeAvailable()) {
         IMU.readGyroscope(x, y, z);
         if(abs(y) > VZ_TH_MOVE) {
@@ -254,6 +258,10 @@ void ClosingState::enter() {
 }
 
 State* ClosingState::run() {
+    State* bt_next_state = check_bt_command();
+    if (bt_next_state != nullptr) {
+        return bt_next_state;
+    }
     if (IMU.gyroscopeAvailable()) {
         IMU.readGyroscope(x, y, z);
         if(abs(y) > VZ_TH_MOVE) {
@@ -270,6 +278,24 @@ void ClosingState::exit() {
     Serial.println("ClosingState::exit");
     motor_stop();
 }
+
+//****************************************************** COMMON BLE STUFF **********************************************************
+
+State* check_bt_command() {
+    BLE.poll();
+    if (doorCharacteristic.written()) {
+        if (doorCharacteristic.value() == 48 ) {
+            return &openingState;
+        } else if(doorCharacteristic.value() == 49) {
+            return &closingState;
+        }
+    }
+    else {
+        return nullptr;
+    }
+}
+
+
 
 //****************************************************** MOTOR & BREAKE STUFF ******************************************************
 
