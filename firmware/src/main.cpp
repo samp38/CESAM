@@ -222,6 +222,7 @@ void OpeningState::enter() {
     Serial.println("OpeningState::enter");
     deactiveBreak();
     motor_move(0);
+    delay(500);
     movement_timer = millis();
 }
 
@@ -248,6 +249,7 @@ void ClosingState::enter() {
     Serial.println("ClosingState::enter");
     deactiveBreak();
     motor_move(1);
+    delay(500);
     movement_timer = millis();
 }
 
