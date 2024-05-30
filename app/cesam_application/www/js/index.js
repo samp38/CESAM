@@ -35,12 +35,8 @@ var app =
         $("#refreshButton").on("click", app.refreshDeviceList);
         $("#openButton").on("click", app.open);
         $("#closeButton").on("click", app.close);
-        $("#openButtondebug").on("click", app.opendebug);
-        $("#closeButtondebug").on("click", app.closedebug);
-        $("#clearButtondebug").on("click", app.cleardebug);
-        $("#courseButton").on("click", app.setCourse);
         $("#disconnectButton").on("click", app.disconnect);
-        $("#course").on("input", app.updateCourse);
+        document.getElementById("command-panel").style.display = "none";
     },
 
     onDeviceReady: function()
@@ -86,6 +82,7 @@ var app =
             $("#disconnectButton").data("deviceId", deviceId);
             target.removeClass("connection");
             target.addClass("connected");
+            document.getElementById("command-panel").style.display = "block";
         };
 
         // If not already connected, connect to the selected device
@@ -156,51 +153,14 @@ var app =
         app.sendData("1");
     },
 
-    opendebug: function(event)
-    {
-        $("#openButtondebug").addClass("btnclick");
-        app.sendData(0);
-    },
-
-    closedebug: function(event)
-    {
-        $("#closeButtondebug").addClass("btnclick");
-        app.sendData("1");
-    },
-
-    cleardebug: function(event)
-    {
-        $("#clearButtondebug").addClass("btnclick");
-        app.sendData("R");
-    },
-
-    setCourse: function(event)
-    {
-        app.sendData("L" + parseFloat($("#courseDisplay").html()))
-        $("#courseButton").addClass("btnhighlight");
-        var value =  $("#courseDisplay").data("courseDisplay");
-        if (value == null)
-        {value=4;}
-        $("#consignedebug").html( "± " + value + "  cm");
-    },
-
     disconnect: function(event)
     {
         $("#disconnectButton").addClass("btnclick");
-        $("#battery").removeClass("FadeIn");
-        $("#batterylevel").removeClass("blink");
-
-        $("#courseButtondebug").removeClass("btnhighlight");
-        document.getElementById("course").value= "4";
-        $("#courseDisplay").html(4+ " cm")
-        $("#position").html(" ");
-        $("#consignedebug").html(" ");
-        $("#positiondebug").html(" ");
-
         var deviceId = $("#disconnectButton").data("deviceId");
 
         if(deviceId)
         {
+            console.log(deviceId + ' disconnected');
             ble.disconnect(deviceId, app.disconnected, app.onError);
         }
     },
@@ -209,19 +169,16 @@ var app =
     {
         $("#deviceList > li").removeClass("connected");
         $("#disconnectButton").data("deviceId", null);
+        document.getElementById("command-panel").style.display = "none";
     },
 
     onError: function(reason)
     {
         alert("ERROR: " + JSON.stringify(reason)); // real apps should use notification.alert
+        app.disconnect();
+        app.disconnected();
+
     },
-
-    updateCourse: function()
-    {   $("#courseButton").removeClass("btnhighlight");
-        $("#courseDisplay").html($(this).val() + " cm");
-        $("#courseDisplay").data("courseDisplay", $(this).val());
-    }
-
 };
 
 app.initialize();
