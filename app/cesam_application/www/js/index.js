@@ -19,7 +19,7 @@ function stringToBytes(string)
     return array.buffer;
 }
 
-var exofinger =
+var cesam =
 {
     serviceUUID: '19B10010-E8F2-537E-4F6C-D104768A1214',
     buttonCharacteristic: '19B10011-E8F2-537E-4F6C-D104768A1214', // transmit is from the phone's perspective
@@ -52,7 +52,7 @@ var app =
     {
         $("#refreshButton").addClass("btnclick");
         $("#deviceList").html(""); // empties the list
-        ble.scan([exofinger.serviceUUID], 5, app.onDiscoverDevice, app.onError);
+        ble.scan([cesam.serviceUUID], 5, app.onDiscoverDevice, app.onError);
     },
 
     onDiscoverDevice: function(device)
@@ -81,7 +81,7 @@ var app =
 
 
             // subscribe for incoming data
-            //ble.startNotification(deviceId, exofinger.serviceUUID, exofinger.buttonCharacteristic, app.onData, app.onError);
+            //ble.startNotification(deviceId, cesam.serviceUUID, cesam.buttonCharacteristic, app.onData, app.onError);
 
             $("#disconnectButton").data("deviceId", deviceId);
             target.removeClass("connection");
@@ -99,7 +99,7 @@ var app =
     {
         var characteristic = peripheral.characteristics.filter(function(element)
         {
-            if(element.characteristic.toLowerCase() === exofinger.buttonCharacteristic)
+            if(element.characteristic.toLowerCase() === cesam.buttonCharacteristic)
             {
                 return element;
             }
@@ -118,7 +118,7 @@ var app =
 
         function failure(reason)
         {
-            alert("Failed writing data to ExoFinger " + JSON.stringify(reason));
+            alert("Failed writing data to CESAM " + JSON.stringify(reason));
         };
 
         if(deviceId)
@@ -127,8 +127,8 @@ var app =
             {
                 ble.writeWithoutResponse(
                     deviceId,
-                    exofinger.serviceUUID,
-                    exofinger.buttonCharacteristic,
+                    cesam.serviceUUID,
+                    cesam.buttonCharacteristic,
                     stringToBytes(data), success, failure
                 );
             }
@@ -136,8 +136,8 @@ var app =
             {
                 ble.write(
                     deviceId,
-                    exofinger.serviceUUID,
-                    exofinger.buttonCharacteristic,
+                    cesam.serviceUUID,
+                    cesam.buttonCharacteristic,
                     stringToBytes(data), success, failure
                 );
             }
