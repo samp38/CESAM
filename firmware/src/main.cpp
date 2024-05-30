@@ -180,7 +180,6 @@ State* BrakedState::run() {
     // listen for Bluetooth® Low Energy peripherals to connect:
     BLEDevice central = BLE.central();
     if (doorCharacteristic.written()) {
-        Serial.println(doorCharacteristic.value());
         if (doorCharacteristic.value() == 48 ) {
             return &openingState;
         } else if(doorCharacteristic.value() == 49) {
