@@ -190,7 +190,7 @@ State* BrakedState::run() {
     // Here we check gyrovalues. If we detect a move, we make the door free
     if (IMU.gyroscopeAvailable()) {
         IMU.readGyroscope(x, y, z);
-        if(abs(y) > 3.) {
+        if(abs(y) + abs(x) + abs(z) > VZ_TH) {
             return &unbrakedState;
         }
     }
