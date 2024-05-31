@@ -1,5 +1,6 @@
 'use strict';
 
+
 // ASCII only
 function bytesToString(buffer)
 {
@@ -37,6 +38,15 @@ var app =
         $("#closeButton").on("click", app.close);
         $("#disconnectButton").on("click", app.disconnect);
         document.getElementById("command-panel").style.display = "none";
+        PullToRefresh.init({
+            mainElement: 'body',
+            onRefresh: function(){
+                // if no ble peripheral connected, refresh devices list
+                if(!$("#disconnectButton").data("deviceId")) {
+                    app.refreshDeviceList();
+                }
+            }
+        });
     },
 
     onDeviceReady: function()
