@@ -222,7 +222,6 @@ State* StartupState::run()
     // Stop MOTOR
     motor_stop();
 
-
     // START BLE
     if (!BLE.begin()) {
     Serial.println("starting Bluetooth® Low Energy module failed!");
@@ -445,10 +444,9 @@ void loop(){
     if (_state != _lastState) {
         if (_lastState != nullptr) {
             _lastState->exit();
-        }
-                
-            _state->enter();
-            _lastState = _state;
+        }        
+        _state->enter();
+        _lastState = _state;
     }
     _state = _state->run();
 }
