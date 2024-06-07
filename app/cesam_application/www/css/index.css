@@ -197,3 +197,23 @@ button:active{
       color: white !important;
     }
 }
+
+.column {
+  float: left;
+  width: 50%;
+}
+
+/* Clear floats after the columns */
+.row:after {
+  content: "";
+  display: table;
+  clear: both;
+}
+
+.settingButton {
+    width: 3em;
+}
+
+.label {
+    text-align: left;
+}
