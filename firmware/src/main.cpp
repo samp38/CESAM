@@ -143,7 +143,7 @@ ClosingState closingState;
 
 State *_state = &startupState;
 State *_lastState = nullptr;
-
+unsigned long last_processing_time;
 
 
 void StartupState::enter()
@@ -244,6 +244,8 @@ void BrakedState::enter() {
 }
 
 State* BrakedState::run() {
+    if (millis() - last_processing_time < LOOP_TIME_MS) {return this;}
+    last_processing_time = millis();
     State* bt_next_state = check_bt_command();
     if (bt_next_state != nullptr) {
         return bt_next_state;
@@ -266,6 +268,8 @@ void UnbrakedState::enter() {
 }
 
 State* UnbrakedState::run() {
+    if (millis() - last_processing_time < LOOP_TIME_MS) {return this;}
+    last_processing_time = millis();
     State* bt_next_state = check_bt_command();
     if (bt_next_state != nullptr) {
         return bt_next_state;
@@ -293,6 +297,8 @@ void OpeningState::enter() {
 }
 
 State* OpeningState::run() {
+    if (millis() - last_processing_time < LOOP_TIME_MS) {return this;}
+    last_processing_time = millis();
     State* bt_next_state = check_bt_command();
     if (bt_next_state != nullptr) {
         return bt_next_state;
@@ -324,6 +330,8 @@ void ClosingState::enter() {
 }
 
 State* ClosingState::run() {
+    if (millis() - last_processing_time < LOOP_TIME_MS) {return this;}
+    last_processing_time = millis();
     State* bt_next_state = check_bt_command();
     if (bt_next_state != nullptr) {
         return bt_next_state;
