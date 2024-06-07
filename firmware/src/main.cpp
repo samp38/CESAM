@@ -4,14 +4,48 @@
 #include "Arduino_BMI270_BMM150.h"
 #include <Servo.h>
 #include <ArduinoBLE.h>
+#include <NanoBLEFlashPrefs.h>
 #elif FEATHER_SENSE
 
 #endif
 
+#define DEFAULT_SPEED 255           // for eeprom setting
+#define DEFAULT_NAME "CESAM_DOOR"   // for eeprom setting
 
 #define VZ_TH  2.0f
 #define VZ_TH_MOVE  1.0f
+#define LOOP_TIME_MS 100
 
+//****************************************************** EEPROM STUFF ***************************************************
+
+
+NanoBLEFlashPrefs myFlashPrefs;
+
+// Structure of preferences. You determine the fields.
+// Must not exeed 1019 words (4076 byte).
+typedef struct flashStruct
+{
+  char pref_doorName[64];
+  int speed;
+} flashPrefs;
+
+flashPrefs globalPrefs;
+
+void printPreferences(flashPrefs thePrefs)
+{
+  Serial.println("Preferences: ");
+  Serial.println(thePrefs.pref_doorName);
+  Serial.println(thePrefs.speed);
+}
+
+// Print return code infos to Serial.
+void printReturnCode(int rc)
+{
+  Serial.print("Return code: ");
+  Serial.print(rc);
+  Serial.print(", ");
+  Serial.println(myFlashPrefs.errorString(rc));
+}
 
 //****************************************************** BLE STUFF ******************************************************
 
@@ -137,6 +171,38 @@ State* StartupState::run()
     Serial.println(" Hz");
     Serial.println();
     Serial.println("Gyroscope in degrees/second");
+
+    // Check (fake)EEPROM settings
+    // See if we already have a preference record
+    Serial.println("Read preference record...");
+    int rc = myFlashPrefs.readPrefs(&globalPrefs, sizeof(globalPrefs));
+    if (rc == FDS_SUCCESS)
+    {
+        printPreferences(globalPrefs);
+    }
+    else
+    {
+        Serial.println("No preferences found."); // This should be the case when running for the first time on that particular board
+        printReturnCode(rc);
+        Serial.println("Setting default settings values into EEPROM");
+        globalPrefs.speed = DEFAULT_SPEED;
+        strcpy(globalPrefs.pref_doorName, DEFAULT_NAME);
+        myFlashPrefs.writePrefs(&globalPrefs, sizeof(globalPrefs));
+        rc = myFlashPrefs.readPrefs(&globalPrefs, sizeof(globalPrefs));
+        if (rc == FDS_SUCCESS)
+        {
+            printPreferences(globalPrefs);
+        }
+        else
+        {
+            printReturnCode(rc);
+            Serial.println("");
+            Serial.println("Cannot write to fake EEPROM");
+            while(1) {;}
+        }
+        
+    }
+    Serial.println("");
 
     // Stop MOTOR
     motor_stop();
@@ -306,11 +372,11 @@ void motor_stop(){
 
 void motor_move(uint8_t direction, uint8_t speed) {
     if(direction) {
-        digitalWrite(MOTOR_PIN1, HIGH);
+        analogWrite(MOTOR_PIN1, globalPrefs.speed);
         digitalWrite(MOTOR_PIN2, LOW);
     } else {
         digitalWrite(MOTOR_PIN1, LOW);
-        digitalWrite(MOTOR_PIN2, HIGH);
+        analogWrite(MOTOR_PIN2, globalPrefs.speed);
     }
 }
 
