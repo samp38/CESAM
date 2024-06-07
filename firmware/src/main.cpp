@@ -55,6 +55,20 @@ BLEService doorService("6e400001-b5a3-f393-e0a9-e50e24dcca9e"); // create servic
 BLEByteCharacteristic doorCharacteristic("6e400002-b5a3-f393-e0a9-e50e24dcca9e", BLERead | BLEWrite);
 BLEByteCharacteristic speedCharacteristic("6e400003-b5a3-f393-e0a9-e50e24dcca9e", BLERead | BLEWrite | BLENotify);
 
+void blePeripheralConnectHandler(BLEDevice central) {
+    Serial.print("Connected event, central: ");
+    Serial.println(central.address());
+}
+
+
+void speedCharacteristicWrittenHandler(BLEDevice central, BLECharacteristic characteristic) {
+    Serial.println("Characteristic written : " + String(characteristic.uuid()));
+    Serial.print("received value : ");
+    int newSpeed = speedCharacteristic.value();
+    Serial.println(newSpeed);
+    globalPrefs.speed = newSpeed;
+    myFlashPrefs.writePrefs(&globalPrefs, sizeof(globalPrefs));
+}
 
 
 //****************************************************** SERVO STUFF ******************************************************
@@ -230,6 +244,10 @@ State* StartupState::run()
 
     // doorCharacteristic.writeValue(0);
     speedCharacteristic.writeValue(globalPrefs.speed);
+
+    // Set Callbacks
+    BLE.setEventHandler(BLEConnected, blePeripheralConnectHandler);
+    speedCharacteristic.setEventHandler(BLEWritten, speedCharacteristicWrittenHandler);
 
     // start advertising
     BLE.advertise();
