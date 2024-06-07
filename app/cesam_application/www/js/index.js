@@ -77,12 +77,20 @@ var app =
         $("#closeButton").on("click", app.close);
         $("#disconnectButton").on("click", app.disconnect);
         document.getElementById("command-panel").style.display = "none";
+        $("#speedMinus").on("click", function() {
+            app.incrementSpeed(-1);
+        });
+        $("#speedPlus").on("click", function() {
+                    app.incrementSpeed(1);
+        });
         PullToRefresh.init({
             mainElement: 'body',
             onRefresh: function(){
                 // if no ble peripheral connected, refresh devices list
                 if(!$("#disconnectButton").data("deviceId")) {
                     app.refreshDeviceList();
+                } else {
+                    app.refresh_ble_peripheral_parameters();
                 }
             }
         });
@@ -117,17 +125,13 @@ var app =
     {
         var target = $(e.target)
         var deviceId = $(e.target).data("deviceId")
-
         target.addClass("connection")
 
         function onConnect(peripheral)
         {
             //app.determineWriteType(peripheral);
-
-
-            // subscribe for incoming data
-            //ble.startNotification(deviceId, cesam.serviceUUID, cesam.buttonCharacteristic, app.onData, app.onError);
-
+            // subscribe for incoming data from speed
+            ble.startNotification(deviceId, cesam.serviceUUID, cesam.speedCharacteristic, app.onData, app.onError);
             $("#disconnectButton").data("deviceId", deviceId);
             target.removeClass("connection");
             target.addClass("connected");
@@ -137,21 +141,18 @@ var app =
         // If not already connected, connect to the selected device
         if(!$("#disconnectButton").data("deviceId"))
         {
+            console.log("BLE NOT ALREADY CONNECTED, CONNECTING...");
             ble.connect(deviceId, onConnect, app.onError);
+            setTimeout(() => app.refresh_ble_peripheral_parameters(), 3000);
         }
     },
 
-    determineWriteType: function(peripheral)
-    {
-        var characteristic = peripheral.characteristics.filter(function(element)
-        {
-            if(element.characteristic.toLowerCase() === cesam.buttonCharacteristic)
-            {
-                return element;
-            }
-        })[0];
 
-        app.writeWithoutResponse = (characteristic.properties.indexOf('WriteWithoutResponse') > -1);
+    onData: function(data)
+    {
+        var rspeed = fromBytes(data);
+        console.log("Speed received : " + rspeed);
+        document.getElementById("settingSpeed").innerHTML=rspeed;
     },
 
     sendData: function(data)
@@ -169,24 +170,12 @@ var app =
 
         if(deviceId)
         {
-            if(app.writeWithoutResponse)
-            {
-                ble.writeWithoutResponse(
-                    deviceId,
-                    cesam.serviceUUID,
-                    cesam.buttonCharacteristic,
-                    stringToBytes(data), success, failure
-                );
-            }
-            else
-            {
-                ble.write(
-                    deviceId,
-                    cesam.serviceUUID,
-                    cesam.buttonCharacteristic,
-                    stringToBytes(data), success, failure
-                );
-            }
+            ble.write(
+                deviceId,
+                cesam.serviceUUID,
+                cesam.buttonCharacteristic,
+                stringToBytes(data), success, failure
+            );
         }
     },
 
@@ -200,6 +189,35 @@ var app =
     {
         $("#closeButton").addClass("btnclick");
         app.sendData("1");
+    },
+
+    refresh_ble_peripheral_parameters: function(event) {
+        app.sendData("2");
+    },
+
+    incrementSpeed: function(incr) {
+        var deviceId = $("#disconnectButton").data("deviceId");
+
+        function success()
+        {
+        };
+
+        function failure(reason)
+        {
+            alert("Failed writing speed to CESAM, error code :  " + JSON.stringify(reason));
+        };
+
+        if(deviceId)
+        {
+            var speed = parseInt(document.getElementById("settingSpeed").innerHTML);
+            var newspeed = speed + parseInt(incr);
+            ble.write(
+                deviceId,
+                cesam.serviceUUID,
+                cesam.speedCharacteristic,
+                toBytes(newspeed), success, failure
+            );
+        }
     },
 
     disconnect: function(event)
