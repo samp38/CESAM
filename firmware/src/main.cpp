@@ -49,10 +49,11 @@ void printReturnCode(int rc)
 
 //****************************************************** BLE STUFF ******************************************************
 
-BLEService doorService("19B10010-E8F2-537E-4F6C-D104768A1214"); // create service
+BLEService doorService("6e400001-b5a3-f393-e0a9-e50e24dcca9e"); // create service
 
 // create switch characteristic and allow remote device to read and write
-BLEByteCharacteristic doorCharacteristic("19B10011-E8F2-537E-4F6C-D104768A1214", BLERead | BLEWrite);
+BLEByteCharacteristic doorCharacteristic("6e400002-b5a3-f393-e0a9-e50e24dcca9e", BLERead | BLEWrite);
+BLEByteCharacteristic speedCharacteristic("6e400003-b5a3-f393-e0a9-e50e24dcca9e", BLERead | BLEWrite | BLENotify);
 
 
 
@@ -222,11 +223,13 @@ State* StartupState::run()
 
     // add the characteristics to the service
     doorService.addCharacteristic(doorCharacteristic);
+    doorService.addCharacteristic(speedCharacteristic);
 
     // add the service
     BLE.addService(doorService);
 
-    doorCharacteristic.writeValue(0);
+    // doorCharacteristic.writeValue(0);
+    speedCharacteristic.writeValue(globalPrefs.speed);
 
     // start advertising
     BLE.advertise();
