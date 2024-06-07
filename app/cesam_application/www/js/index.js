@@ -60,8 +60,9 @@ function fromBytes(buffer) {
 
 var cesam =
 {
-    serviceUUID: '19B10010-E8F2-537E-4F6C-D104768A1214',
-    buttonCharacteristic: '19B10011-E8F2-537E-4F6C-D104768A1214', // transmit is from the phone's perspective
+    serviceUUID: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+    buttonCharacteristic: '6e400002-b5a3-f393-e0a9-e50e24dcca9e', // transmit is from the phone's perspective
+    speedCharacteristic: '6e400003-b5a3-f393-e0a9-e50e24dcca9e'
 };
 
 var app =
