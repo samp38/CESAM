@@ -172,7 +172,6 @@ void StartupState::enter()
 State* StartupState::run()
 {
     Serial.println("StartupState::run");
-    // delay(1000);
     // Start filter
 
     // Start IMU
