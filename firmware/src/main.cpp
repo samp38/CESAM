@@ -381,7 +381,12 @@ State* check_bt_command() {
             return &openingState;
         } else if(doorCharacteristic.value() == 49) {
             return &closingState;
+        } else if( doorCharacteristic.value() == 50) {
+            Serial.println("REFRESH");
+            speedCharacteristic.writeValue(globalPrefs.speed);
+            return nullptr;
         }
+        else {return nullptr;}
     }
     else {
         return nullptr;
