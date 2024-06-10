@@ -12,6 +12,7 @@
     <author href="https://project.inria.fr/humanlabinria/">
         HumanLab Inria team
     </author>
+    <icon src="www/img/logoCESAM.png" />
     <content src="index.html" />
     <access origin="*" />
     <plugin name="cordova-plugin-ble-central" spec="~1.3.1" />
