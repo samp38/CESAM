@@ -71,8 +71,8 @@ var app =
     {
         setTimeout(() => {  $("#index").remove()}, 2000);
         document.addEventListener("deviceReady", app.onDeviceReady, false);
-        $("#refreshButton").on("click", app.disconnect);
-        $("#refreshButton").on("click", app.refreshDeviceList);
+//        $("#refreshButton").on("click", app.disconnect);
+//        $("#refreshButton").on("click", app.refreshDeviceList);
         $("#openButton").on("click", app.open);
         $("#closeButton").on("click", app.close);
         $("#disconnectButton").on("click", app.disconnect);
