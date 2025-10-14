@@ -13,17 +13,19 @@
   "author": "Apache Cordova Team",
   "license": "Apache-2.0",
   "devDependencies": {
-    "cordova-android": "^10.0",
+    "cordova-android": "^12.0.1",
     "cordova-custom-config": "^5.1.1",
-    "cordova-plugin-ble-central": "~1.3.1",
+    "cordova-plugin-ble-central": "github:don/cordova-plugin-ble-central",
     "cordova-plugin-whitelist": "^1.3.4",
     "pulltorefreshjs": "^0.1.22"
   },
   "cordova": {
     "plugins": {
       "cordova-plugin-whitelist": {},
-      "cordova-plugin-ble-central": {},
-      "cordova-custom-config": {}
+      "cordova-custom-config": {},
+      "cordova-plugin-ble-central": {
+        "ACCESS_BACKGROUND_LOCATION": "false"
+      }
     },
     "platforms": [
       "android"
