@@ -133,6 +133,7 @@ var app =
             // subscribe for incoming data from speed
             ble.startNotification(deviceId, cesam.serviceUUID, cesam.speedCharacteristic, app.onData, app.onError);
             $("#disconnectButton").data("deviceId", deviceId);
+            $("#disconnectButton").show();
             target.removeClass("connection");
             target.addClass("connected");
             document.getElementById("command-panel").style.display = "block";
@@ -236,6 +237,7 @@ var app =
     {
         $("#deviceList > li").removeClass("connected");
         $("#disconnectButton").data("deviceId", null);
+        $("#disconnectButton").hide();
         document.getElementById("command-panel").style.display = "none";
     },
 
