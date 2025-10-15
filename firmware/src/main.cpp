@@ -6,7 +6,9 @@
 #include <ArduinoBLE.h>
 #include <NanoBLEFlashPrefs.h>
 #elif FEATHER_SENSE
-
+#include <bluefruit.h>          // Adafruit BLE API
+#include <Adafruit_LSM6DS33.h>
+#include <Servo.h>
 #endif
 
 #define DEFAULT_SPEED 255           // for eeprom setting
