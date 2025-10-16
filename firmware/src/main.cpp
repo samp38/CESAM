@@ -130,7 +130,10 @@ State* BrakedState::run() {
     }
     if (IMU_GyroscopeAvailable()) {
         IMU_ReadGyroscope(x, y, z);
-        if(abs(y) + abs(x) + abs(z) > VZ_TH) {
+        float total = abs(y) + abs(x) + abs(z);
+        // Serial.print("Gyro total: ");
+        // Serial.println(total);
+        if(total > VZ_TH) {
             return &unbrakedState;
         }
     }
