@@ -137,7 +137,7 @@ var app =
             target.removeClass("connection");
             target.addClass("connected");
             document.getElementById("command-panel").style.display = "block";
-        };
+        }
 
         // If not already connected, connect to the selected device
         if(!$("#disconnectButton").data("deviceId"))
@@ -201,16 +201,23 @@ var app =
 
         function success()
         {
+            // Demander un refresh pour mettre à jour la vitesse
+            app.refresh_ble_peripheral_parameters();
         };
 
         function failure(reason)
         {
-            alert("Failed writing speed to CESAM, error code :  " + JSON.stringify(reason));
+            alert("Failed writing speed to CESAM, error code: " + JSON.stringify(reason));
         };
 
         if(deviceId)
         {
             var speed = parseInt(document.getElementById("settingSpeed").innerHTML);
+            
+            if (isNaN(speed)) {
+                speed = 255;
+            }
+            
             var newspeed = speed + parseInt(incr);
             ble.write(
                 deviceId,
