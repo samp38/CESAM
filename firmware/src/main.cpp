@@ -4,7 +4,6 @@
 #include "ble_hal.h"
 #include "storage_hal.h"
 #include "motor_control.h"
-#include "servo_hal.h"
 
 #define VZ_TH  2.0f
 #define VZ_TH_MOVE  1.0f
@@ -28,13 +27,7 @@ public:
     virtual State *run() override;
 };
 
-class BrakedState : public State {
-public:
-    virtual void enter() override;
-    virtual State *run() override;
-};
-
-class UnbrakedState : public State {
+class StoppedState : public State {
 public:
     virtual void enter() override;
     virtual State *run() override;
@@ -61,22 +54,13 @@ private:
 State* check_bt_command();
 
 StartupState startupState;
-BrakedState brakedState;
-UnbrakedState unbrakedState;
+StoppedState stoppedState;
 OpeningState openingState;
 ClosingState closingState;
 
 State *_state = &startupState;
 State *_lastState = nullptr;
 unsigned long last_processing_time;
-
-void activeBreak() {
-    Servo_Write(75);
-}
-
-void deactiveBreak() {
-    Servo_Write(30);
-}
 
 void StartupState::enter() {
     Serial.println("StartupState::enter");
@@ -111,65 +95,29 @@ State* StartupState::run() {
     }
 
     Serial.println("Bluetooth® device active, waiting for connections...");
-    return &brakedState;
+    return &stoppedState;
 }
 
-void BrakedState::enter() {
-    Serial.println("BrakedState::enter");
+void StoppedState::enter() {
+    Serial.println("StoppedState::enter");
     Motor_Stop();
-    activeBreak();
     delay(1000);
 }
 
-State* BrakedState::run() {
+State* StoppedState::run() {
     if (millis() - last_processing_time < LOOP_TIME_MS) {return this;}
     last_processing_time = millis();
     State* bt_next_state = check_bt_command();
     if (bt_next_state != nullptr) {
         return bt_next_state;
     }
-    if (IMU_GyroscopeAvailable()) {
-        IMU_ReadGyroscope(x, y, z);
-        float total = abs(y) + abs(x) + abs(z);
-        // Serial.print("Gyro total: ");
-        // Serial.println(total);
-        if(total > VZ_TH) {
-            return &unbrakedState;
-        }
-    }
     return this;
 }
 
-unsigned long autoBreak_timer;
-void UnbrakedState::enter() {
-    Serial.println("UnBrakedState::enter");
-    autoBreak_timer = millis();
-    deactiveBreak();
-}
-
-State* UnbrakedState::run() {
-    if (millis() - last_processing_time < LOOP_TIME_MS) {return this;}
-    last_processing_time = millis();
-    State* bt_next_state = check_bt_command();
-    if (bt_next_state != nullptr) {
-        return bt_next_state;
-    }
-    if (IMU_GyroscopeAvailable()) {
-        IMU_ReadGyroscope(x, y, z);
-        if(abs(y) > VZ_TH) {
-            autoBreak_timer = millis();
-        }
-    }
-    if (millis() - autoBreak_timer > 3000) {
-        return &brakedState;
-    }
-    return this;
-}
 
 unsigned long movement_timer;
 void OpeningState::enter() {
     Serial.println("OpeningState::enter");
-    deactiveBreak();
     Motor_Move(0);
     delay(500);
     movement_timer = millis();
@@ -189,7 +137,7 @@ State* OpeningState::run() {
         }
     }
     if (millis() - movement_timer > 1000) {
-        return &brakedState;
+        return &stoppedState;
     }
     return this;
 }
@@ -201,7 +149,6 @@ void OpeningState::exit() {
 
 void ClosingState::enter() {
     Serial.println("ClosingState::enter");
-    deactiveBreak();
     Motor_Move(1);
     delay(500);
     movement_timer = millis();
@@ -221,7 +168,7 @@ State* ClosingState::run() {
         }
     }
     if (millis() - movement_timer > 1000) {
-        return &brakedState;
+        return &stoppedState;
     }
     return this;
 }
@@ -249,9 +196,7 @@ void setup() {
     Serial.begin(9600);
     pinMode(MOTOR_PIN1, OUTPUT);
     pinMode(MOTOR_PIN2, OUTPUT);
-    pinMode(SERVO_PIN, OUTPUT);
 
-    Servo_Init(SERVO_PIN);
     digitalWrite(LED_BUILTIN, LOW);
     
     Storage_Init();
