@@ -78,10 +78,10 @@ var app =
         $("#disconnectButton").on("click", app.disconnect);
         document.getElementById("command-panel").style.display = "none";
         $("#speedMinus").on("click", function() {
-            app.incrementSpeed(-1);
+            app.incrementSpeed(-25);
         });
         $("#speedPlus").on("click", function() {
-                    app.incrementSpeed(1);
+                    app.incrementSpeed(25);
         });
         PullToRefresh.init({
             mainElement: 'body',
@@ -201,7 +201,7 @@ var app =
 
         function success()
         {
-            // Demander un refresh pour mettre à jour la vitesse
+            // Ask hardware to send updated values
             app.refresh_ble_peripheral_parameters();
         };
 
@@ -213,12 +213,16 @@ var app =
         if(deviceId)
         {
             var speed = parseInt(document.getElementById("settingSpeed").innerHTML);
-            
             if (isNaN(speed)) {
                 speed = 255;
             }
-            
             var newspeed = speed + parseInt(incr);
+            if ((incr < 0) && (speed < -incr + 1)) {
+                newspeed = 255;
+            }
+            else if ((incr > 0) && (speed > 255 - incr)) {
+                newspeed = 5;
+            }
             ble.write(
                 deviceId,
                 cesam.serviceUUID,
