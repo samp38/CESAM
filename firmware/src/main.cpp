@@ -118,7 +118,7 @@ State* StoppedState::run() {
 unsigned long movement_timer;
 void OpeningState::enter() {
     Serial.println("OpeningState::enter");
-    Motor_Move(0);
+    Motor_Move(0, Storage_GetSpeed());
     delay(500);
     movement_timer = millis();
 }
@@ -149,7 +149,7 @@ void OpeningState::exit() {
 
 void ClosingState::enter() {
     Serial.println("ClosingState::enter");
-    Motor_Move(1);
+    Motor_Move(1, Storage_GetSpeed());
     delay(500);
     movement_timer = millis();
 }
@@ -220,4 +220,5 @@ void loop() {
         _lastState = _state;
     }
     _state = _state->run();
+    Storage_Process();
 }
