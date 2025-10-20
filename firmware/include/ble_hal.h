@@ -34,7 +34,7 @@ void speedCharacteristicWrittenHandler(BLEDevice central, BLECharacteristic char
     int newSpeed = speedCharacteristic.value();
     Serial.println(newSpeed);
     Storage_SetSpeed(newSpeed);
-    Storage_WritePrefs();
+    // Storage_WritePrefs();
 }
 
 bool BLE_Init() {

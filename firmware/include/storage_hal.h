@@ -33,6 +33,9 @@ void Storage_PrintPrefs();
 
 static NanoBLEFlashPrefs myFlashPrefs;
 static flashPrefs globalPrefs;
+static unsigned long last_write_time = 0;
+static uint8_t pending_speed = 0;
+static bool write_pending = false;
 
 void Storage_Init() {
     // Lancer un garbage collection au démarrage
@@ -99,6 +102,17 @@ void Storage_SetSpeed(uint8_t speed) {
     Serial.print("Storage_SetSpeed called with: ");
     Serial.println(speed);
     globalPrefs.speed = speed;
+    pending_speed = speed;
+    write_pending = true;
+    last_write_time = millis();
+}
+
+void Storage_Process() {
+    if (write_pending && (millis() - last_write_time > 3000)) {
+        // Écrire seulement si pas de changement depuis 2s
+        write_pending = false;
+        Storage_WritePrefs();
+    }
 }
 
 #elif FEATHER_SENSE

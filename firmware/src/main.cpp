@@ -196,6 +196,11 @@ void setup() {
     Serial.begin(9600);
     pinMode(MOTOR_PIN1, OUTPUT);
     pinMode(MOTOR_PIN2, OUTPUT);
+    long start_time = millis();
+    while (!Serial && (millis() - start_time < 10000)) {
+        ; // wait for serial port to connect. Needed for native USB
+    }
+    Serial.println("=== NanoBLE Door Opener ===");
 
     digitalWrite(LED_BUILTIN, LOW);
     
