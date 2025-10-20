@@ -12,6 +12,7 @@ void Motor_Move(uint8_t direction, uint8_t speed = 255);
 
 // Implementation
 void Motor_Stop() {
+    Serial.println("Motor_Stop: Stopping motor");
     digitalWrite(MOTOR_PIN1, LOW);
     digitalWrite(MOTOR_PIN2, LOW);
 }
