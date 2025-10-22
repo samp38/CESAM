@@ -11,6 +11,7 @@
 
 //****************************************************** STATE MACHINE ******************************************************
 
+// Global gyroscope readings
 float x, y, z;
 
 class State {
@@ -132,7 +133,8 @@ State* OpeningState::run() {
     }
     if (IMU_GyroscopeAvailable()) {
         IMU_ReadGyroscope(x, y, z);
-        if(abs(y) > VZ_TH_MOVE) {
+        float total_rot = abs(x) + abs(y) + abs(z);
+        if(total_rot > VZ_TH_MOVE) {
             movement_timer = millis();
         }
     }
@@ -163,7 +165,8 @@ State* ClosingState::run() {
     }
     if (IMU_GyroscopeAvailable()) {
         IMU_ReadGyroscope(x, y, z);
-        if(abs(y) > VZ_TH_MOVE) {
+        float total_rot = abs(x) + abs(y) + abs(z);
+        if(total_rot > VZ_TH_MOVE) {
             movement_timer = millis();
         }
     }
