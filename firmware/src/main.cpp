@@ -6,7 +6,7 @@
 #include "motor_control.h"
 
 #define VZ_TH  2.0f
-#define VZ_TH_MOVE  1.0f
+#define VZ_TH_MOVE  6.0f
 #define LOOP_TIME_MS 100
 
 //****************************************************** STATE MACHINE ******************************************************
