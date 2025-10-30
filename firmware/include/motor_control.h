@@ -22,12 +22,14 @@ void Motor_Move(uint8_t direction, uint8_t speed) {
     
     if (direction) {
         Serial.println("Motor_Move: Moving in direction 1 with speed " + String(motorSpeed));
-        analogWrite(MOTOR_PIN1, motorSpeed);
-        digitalWrite(MOTOR_PIN2, LOW);
+        digitalWrite(MOTOR_PIN1, LOW);
+        digitalWrite(MOTOR_PIN2, HIGH);
+        analogWrite(MOTOR_PWM, motorSpeed);
     } else {
         Serial.println("Motor_Move: Moving in direction 0 with speed " + String(motorSpeed));
-        digitalWrite(MOTOR_PIN1, LOW);
-        analogWrite(MOTOR_PIN2, motorSpeed);
+        digitalWrite(MOTOR_PIN1, HIGH);
+        digitalWrite(MOTOR_PIN2, LOW);
+        analogWrite(MOTOR_PWM, motorSpeed);
     }
 }
 

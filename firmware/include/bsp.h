@@ -6,6 +6,7 @@
 #ifdef NANO_33_BLE
   #define MOTOR_PIN1 D2
   #define MOTOR_PIN2 D3
+  #define MOTOR_PWM D5
 #elif FEATHER_SENSE
   #define MOTOR_PIN1 A0
   #define MOTOR_PIN2 A1
