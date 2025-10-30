@@ -88,6 +88,10 @@ bool IMU_GyroscopeAvailable() {
     return IMU.gyroscopeAvailable();
 }
 
+bool IMU_AccelerometerAvailable() {
+    return IMU.accelerationAvailable();
+}
+
 void IMU_ReadGyroscope(float &x, float &y, float &z) {
     IMU.readGyroscope(x, y, z);
     applyCalibration(x, y, z);

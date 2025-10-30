@@ -131,7 +131,7 @@ State* OpeningState::run() {
     if (bt_next_state != nullptr) {
         return bt_next_state;
     }
-    if (IMU_GyroscopeAvailable()) {
+    if (IMU_AccelerometerAvailable()) { //testing the availability of IMU data. Due to a known issue on Arduino Nano 33 BLE Rev 2 (the Gyroscope available flag stays FALSE), we test here the acceleration available flag.
         IMU_ReadGyroscope(x, y, z);
         float total_rot = abs(x) + abs(y) + abs(z);
         if(total_rot > VZ_TH_MOVE) {
@@ -163,7 +163,7 @@ State* ClosingState::run() {
     if (bt_next_state != nullptr) {
         return bt_next_state;
     }
-    if (IMU_GyroscopeAvailable()) {
+    if (IMU_AccelerometerAvailable()) { //testing the availability of IMU data. Due to a known issue on Arduino Nano 33 BLE Rev 2 (the Gyroscope available flag stays FALSE), we test here the acceleration available flag.
         IMU_ReadGyroscope(x, y, z);
         float total_rot = abs(x) + abs(y) + abs(z);
         if(total_rot > VZ_TH_MOVE) {
