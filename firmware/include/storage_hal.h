@@ -13,14 +13,20 @@
 
 #define DEFAULT_SPEED 255
 #define DEFAULT_NAME_PREFIX "CESAM"
+#define DEFAULT_REVERSED 0
 
 // The name is advertised in the scan response, whose payload is 31 bytes: one length
 // byte and one type byte precede it, so 29 characters are all that fit.
 #define MAX_NAME_LEN 29
 
+// Adding a field here changes sizeof(flashPrefs), which makes the stored record
+// unreadable: the next boot falls back to Storage_SetDefaults(), so speed goes back to
+// 255 and the name is regenerated. A one-off reset per firmware upgrade, not a data loss
+// worth migrating around at this stage.
 typedef struct {
   char pref_doorName[64];
   uint8_t speed;  // ← uint8_t au lieu de int (1 byte explicite)
+  uint8_t reversed;  // motor wired the other way round: swap the two directions
 } flashPrefs;
 
 // Public API
@@ -32,6 +38,8 @@ uint8_t Storage_GetSpeed();
 void Storage_SetSpeed(uint8_t speed);
 const char* Storage_GetName();
 void Storage_SetName(const char* name);
+uint8_t Storage_GetReversed();
+void Storage_SetReversed(uint8_t reversed);
 void Storage_Process();
 void Storage_PrintPrefs();
 
@@ -77,6 +85,7 @@ void Storage_PrintPrefs() {
     Serial.println("Preferences: ");
     Serial.println(globalPrefs.pref_doorName);
     Serial.println(globalPrefs.speed);
+    Serial.println(globalPrefs.reversed);
 }
 
 bool Storage_ReadPrefs() {
@@ -121,6 +130,7 @@ bool Storage_WritePrefs() {
 
 void Storage_SetDefaults() {
     globalPrefs.speed = DEFAULT_SPEED;
+    globalPrefs.reversed = DEFAULT_REVERSED;
     Storage_DefaultName(globalPrefs.pref_doorName, sizeof(globalPrefs.pref_doorName));
 }
 
@@ -146,6 +156,18 @@ void Storage_SetName(const char* name) {
     Serial.println(name);
     strncpy(globalPrefs.pref_doorName, name, MAX_NAME_LEN);
     globalPrefs.pref_doorName[MAX_NAME_LEN] = '\0';
+    write_pending = true;
+    last_write_time = millis();
+}
+
+uint8_t Storage_GetReversed() {
+    return globalPrefs.reversed;
+}
+
+void Storage_SetReversed(uint8_t reversed) {
+    Serial.print("Storage_SetReversed called with: ");
+    Serial.println(reversed);
+    globalPrefs.reversed = reversed ? 1 : 0;
     write_pending = true;
     last_write_time = millis();
 }
@@ -176,6 +198,7 @@ void Storage_PrintPrefs() {
     Serial.println("Preferences: ");
     Serial.println(globalPrefs.pref_doorName);
     Serial.println(globalPrefs.speed);
+    Serial.println(globalPrefs.reversed);
 }
 
 bool Storage_ReadPrefs() {
@@ -217,6 +240,7 @@ bool Storage_WritePrefs() {
 
 void Storage_SetDefaults() {
     globalPrefs.speed = DEFAULT_SPEED;
+    globalPrefs.reversed = DEFAULT_REVERSED;
     Storage_DefaultName(globalPrefs.pref_doorName, sizeof(globalPrefs.pref_doorName));
 }
 
@@ -241,6 +265,18 @@ void Storage_SetName(const char* name) {
     Serial.println(name);
     strncpy(globalPrefs.pref_doorName, name, MAX_NAME_LEN);
     globalPrefs.pref_doorName[MAX_NAME_LEN] = '\0';
+    write_pending = true;
+    last_write_time = millis();
+}
+
+uint8_t Storage_GetReversed() {
+    return globalPrefs.reversed;
+}
+
+void Storage_SetReversed(uint8_t reversed) {
+    Serial.print("Storage_SetReversed called with: ");
+    Serial.println(reversed);
+    globalPrefs.reversed = reversed ? 1 : 0;
     write_pending = true;
     last_write_time = millis();
 }

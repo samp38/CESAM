@@ -171,6 +171,7 @@ We use the sum of absolute values from all 3 axes to detect any rotation, regard
 | Speed | `...0003` | Read, Write, Notify | 1 byte, raw |
 | Name | `...0004` | Read, Write | up to 29 chars |
 | State | `...0005` | Read, Notify | 1 byte, raw enum |
+| Reverse | `...0006` | Read, Write | 1 byte, 0 or 1 |
 
 Note the asymmetry: commands are ASCII characters, everything else is raw bytes. The
 commands are kept in ASCII because they read directly in the serial logs.
@@ -200,6 +201,13 @@ current state right after connecting: that is what `'2'` is for.
 | 4 | `DOOR_STATE_PAUSED` | stopped part-way by a pause command |
 | 5 | `DOOR_STATE_OPENING` | opening in progress |
 | 6 | `DOOR_STATE_CLOSING` | closing in progress |
+
+### Reverse (`...0006`)
+
+Set when the motor is wired the other way round, so that Open opens rather than closes.
+Stored in flash (`reversed`) because it describes the installation, not the session, and
+applied in `Motor_Move()` — the single place both `OpeningState` and `ClosingState` go
+through. The board normalises anything non-zero to 1 and echoes the value back.
 
 ### Name (`...0004`)
 

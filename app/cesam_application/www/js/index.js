@@ -65,6 +65,7 @@ var cesam =
     speedCharacteristic: '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
     nameCharacteristic: '6e400004-b5a3-f393-e0a9-e50e24dcca9e',
     stateCharacteristic: '6e400005-b5a3-f393-e0a9-e50e24dcca9e',
+    reverseCharacteristic: '6e400006-b5a3-f393-e0a9-e50e24dcca9e',
 
     scanSeconds: 5,
     maxNameLength: 29, // MAX_NAME_LEN in the firmware: what fits in the scan response
@@ -103,6 +104,8 @@ var cesam =
 //   state:     "disconnected" | "connecting" | "connected",
 //   doorState: the last state notified by the board, or null while unknown,
 //   speed:     the last speed notified by the board, or null while unknown,
+//   reversed:  true when the board inverts the motor direction; assumed false until the
+//              board has been read, which matches the firmware default,
 //   nameDraft: what the user is currently typing in the rename field, or null,
 //   status:    a short message shown under the device name, or null
 // }
@@ -136,6 +139,9 @@ var app =
         });
         list.on("click", ".speedPlus", function() {
             app.incrementSpeed(app.deviceIdOf(this), cesam.SPEED_STEP);
+        });
+        list.on("click", ".reverseButton", function() {
+            app.toggleReverse(app.deviceIdOf(this));
         });
         list.on("click", ".renameButton", function() {
             app.rename(app.deviceIdOf(this));
@@ -238,6 +244,7 @@ var app =
                 state: "disconnected",
                 doorState: null,
                 speed: null,
+                reversed: false,
                 nameDraft: null,
                 status: null
             };
@@ -303,6 +310,18 @@ var app =
                                   JSON.stringify(reason));
                 });
 
+            // motor wiring is a property of the installation, so it is stored on the
+            // board and only known once read
+            ble.read(deviceId, cesam.serviceUUID, cesam.reverseCharacteristic,
+                function(data) {
+                    device.reversed = fromBytes(data) !== 0;
+                    app.render();
+                },
+                function(reason) {
+                    console.error("Reverse read failed on " + deviceId + ": " +
+                                  JSON.stringify(reason));
+                });
+
             app.refreshParameters(deviceId);
         }
 
@@ -354,6 +373,7 @@ var app =
         device.state = "disconnected";
         device.speed = null;
         device.doorState = null;
+        device.reversed = false;
         device.nameDraft = null;
         app.render();
     },
@@ -412,6 +432,42 @@ var app =
 
         // an unknown value means the board runs a firmware this app does not know about
         return cesam.doorStates[device.doorState] || ("Inconnu (" + device.doorState + ")");
+    },
+
+    // Bistable: the button shows the setting currently stored on the board, and one tap
+    // flips it. The board echoes back the normalised value, which is what gets displayed.
+    toggleReverse: function(deviceId)
+    {
+        var device = devices[deviceId];
+
+        if(!device || device.state !== "connected")
+        {
+            return;
+        }
+
+        var wanted = device.reversed ? 0 : 1;
+
+        // not toBytes(): it encodes 0 as an empty buffer, and the board expects one byte
+        ble.write(deviceId, cesam.serviceUUID, cesam.reverseCharacteristic,
+            new Uint8Array([wanted]).buffer,
+            function() {
+                ble.read(deviceId, cesam.serviceUUID, cesam.reverseCharacteristic,
+                    function(data) {
+                        device.reversed = fromBytes(data) !== 0;
+                        app.render();
+                    },
+                    function() {
+                        // the write went through, so trust it rather than showing nothing
+                        device.reversed = (wanted === 1);
+                        app.render();
+                    });
+            },
+            function(reason) {
+                console.error("Reverse write failed on " + deviceId + ": " +
+                              JSON.stringify(reason));
+                device.status = "Sens moteur non transmis";
+                app.render();
+            });
     },
 
     rename: function(deviceId)
@@ -610,6 +666,14 @@ var app =
                     .appendTo(speedRow);
         $("<button/>").addClass("speedMinus settingButton").text("-").appendTo(speedRow);
         $("<button/>").addClass("speedPlus settingButton").text("+").appendTo(speedRow);
+
+        var reverseRow = $("<div/>").addClass("row").appendTo(panel);
+        $("<span/>").addClass("label").text("Sens moteur : ").appendTo(reverseRow);
+        $("<button/>").addClass("reverseButton")
+                      .toggleClass("on", device.reversed)
+                      .attr("aria-pressed", device.reversed ? "true" : "false")
+                      .text(device.reversed ? "Inversé" : "Normal")
+                      .appendTo(reverseRow);
 
         var nameRow = $("<div/>").addClass("row").appendTo(panel);
         $("<span/>").addClass("label").text("Nom : ").appendTo(nameRow);

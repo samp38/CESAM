@@ -19,7 +19,13 @@ void Motor_Stop() {
 
 void Motor_Move(uint8_t direction, uint8_t speed) {
     int motorSpeed = Storage_GetSpeed();
-    
+
+    // Both OpeningState and ClosingState come through here, so this is the one place
+    // that has to know about a motor wired the other way round.
+    if (Storage_GetReversed()) {
+        direction = !direction;
+    }
+
     if (direction) {
         Serial.println("Motor_Move: Moving in direction 1 with speed " + String(motorSpeed));
         digitalWrite(MOTOR_PIN1, LOW);

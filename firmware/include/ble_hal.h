@@ -43,6 +43,7 @@ static BLEByteCharacteristic doorCharacteristic("6e400002-b5a3-f393-e0a9-e50e24d
 static BLEByteCharacteristic speedCharacteristic("6e400003-b5a3-f393-e0a9-e50e24dcca9e", BLERead | BLEWrite | BLENotify);
 static BLEStringCharacteristic nameCharacteristic("6e400004-b5a3-f393-e0a9-e50e24dcca9e", BLERead | BLEWrite, MAX_NAME_LEN);
 static BLEByteCharacteristic stateCharacteristic("6e400005-b5a3-f393-e0a9-e50e24dcca9e", BLERead | BLENotify);
+static BLEByteCharacteristic reverseCharacteristic("6e400006-b5a3-f393-e0a9-e50e24dcca9e", BLERead | BLEWrite);
 
 void blePeripheralConnectHandler(BLEDevice central) {
     Serial.print("Connected event, central: ");
@@ -56,6 +57,15 @@ void speedCharacteristicWrittenHandler(BLEDevice central, BLECharacteristic char
     Serial.println(newSpeed);
     Storage_SetSpeed(newSpeed);
     // Storage_WritePrefs();
+}
+
+void reverseCharacteristicWrittenHandler(BLEDevice central, BLECharacteristic characteristic) {
+    uint8_t reversed = reverseCharacteristic.value() ? 1 : 0;
+    Serial.print("Reverse written : ");
+    Serial.println(reversed);
+    Storage_SetReversed(reversed);
+    // echo back the normalised value, so the app never shows anything but 0 or 1
+    reverseCharacteristic.writeValue(reversed);
 }
 
 void nameCharacteristicWrittenHandler(BLEDevice central, BLECharacteristic characteristic) {
@@ -98,13 +108,16 @@ bool BLE_Init() {
     doorService.addCharacteristic(speedCharacteristic);
     doorService.addCharacteristic(nameCharacteristic);
     doorService.addCharacteristic(stateCharacteristic);
+    doorService.addCharacteristic(reverseCharacteristic);
     BLE.addService(doorService);
     speedCharacteristic.writeValue(Storage_GetSpeed());
     nameCharacteristic.writeValue(Storage_GetName());
     stateCharacteristic.writeValue(DOOR_STATE_STARTUP);
+    reverseCharacteristic.writeValue(Storage_GetReversed());
     BLE.setEventHandler(BLEConnected, blePeripheralConnectHandler);
     speedCharacteristic.setEventHandler(BLEWritten, speedCharacteristicWrittenHandler);
     nameCharacteristic.setEventHandler(BLEWritten, nameCharacteristicWrittenHandler);
+    reverseCharacteristic.setEventHandler(BLEWritten, reverseCharacteristicWrittenHandler);
     BLE.advertise();
 
     return true;
@@ -135,6 +148,7 @@ static BLECharacteristic doorCharacteristic = BLECharacteristic("6e400002-b5a3-f
 static BLECharacteristic speedCharacteristic = BLECharacteristic("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
 static BLECharacteristic nameCharacteristic = BLECharacteristic("6e400004-b5a3-f393-e0a9-e50e24dcca9e");
 static BLECharacteristic stateCharacteristic = BLECharacteristic("6e400005-b5a3-f393-e0a9-e50e24dcca9e");
+static BLECharacteristic reverseCharacteristic = BLECharacteristic("6e400006-b5a3-f393-e0a9-e50e24dcca9e");
 
 static uint8_t lastDoorCommand = 0;
 static bool clientSubscribed = false;
@@ -194,6 +208,21 @@ void doorCharacteristicWrittenHandler(uint16_t conn_hdl, BLECharacteristic* chr,
         Serial.print("Door command received: ");
         Serial.println((char)lastDoorCommand);
     }
+}
+
+void reverseCharacteristicWrittenHandler(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
+    if (len != 1) {
+        Serial.print("Reverse: unexpected length: ");
+        Serial.println(len);
+        return;
+    }
+
+    uint8_t reversed = data[0] ? 1 : 0;
+    Serial.print("Reverse written : ");
+    Serial.println(reversed);
+    Storage_SetReversed(reversed);
+    // echo back the normalised value, so the app never shows anything but 0 or 1
+    reverseCharacteristic.write8(reversed);
 }
 
 void nameCharacteristicWrittenHandler(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
@@ -300,6 +329,15 @@ bool BLE_Init() {
     stateCharacteristic.begin();
     stateCharacteristic.write8(DOOR_STATE_STARTUP);
     Serial.println("BLE_Init: State characteristic configured");
+
+    // Configuration de la caractéristique de sens moteur
+    reverseCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE);
+    reverseCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
+    reverseCharacteristic.setFixedLen(1);
+    reverseCharacteristic.setWriteCallback(reverseCharacteristicWrittenHandler);
+    reverseCharacteristic.begin();
+    reverseCharacteristic.write8(Storage_GetReversed());
+    Serial.println("BLE_Init: Reverse characteristic configured");
 
     startAdvertising();
 
