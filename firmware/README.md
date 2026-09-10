@@ -256,6 +256,37 @@ At startup (in `IMU_Init()`), the system performs automatic calibration:
 - [ ] Wheel slip detection (high-frequency oscillations)
 - [ ] Motor current measurement to detect overload
 
+### Rotation Direction
+
+Movement detection sums the absolute values of the three gyro axes
+(`total_rot = |x| + |y| + |z|`), so it measures how much the door turns, never which
+way — deliberately, to stay independent of how the board is mounted. The cost is that
+a board whose reverse flag is set wrongly drives the door the wrong way, sees rotation
+all the same, and reports `OPEN` once the travel completes while the door is closed.
+
+Recovering the direction does **not** require modelling the hinge side, the opening
+direction or the mounting orientation. The board is fixed to the door, so the rotation
+axis is constant in the board's frame and those three variables compose into a single
+constant vector that only has to be observed once:
+
+- [ ] Record a normalised reference gyro vector during one opening travel, store it in
+      flash (3 floats), then use `dot(reading, reference) > 0` to tell which way the
+      door is turning. Mounting-, hinge- and swing-agnostic, one dot product per
+      iteration.
+- [ ] Bootstrap it from the reverse setting (`...0006`). The board cannot check on its
+      own that the travel it is learning from really was an opening: all it knows is
+      that it powered the motor in the direction it calls "open", and on a mis-wired
+      motor that direction closes the door. It would then store a closing vector
+      labelled "opening" — wrong, and self-consistent, so undetectable afterwards.
+      Setting the reverse flag is the human vouching, once, that "open" really opens;
+      only then is the observed travel known to be an opening. So this does **not**
+      make the Normal/Inversé toggle redundant, it depends on it.
+- [ ] Once the reference exists, use it as a guard: abort a travel that starts turning
+      the wrong way instead of running it to completion and reporting the wrong state.
+
+Note this adds a field to `flashPrefs`, hence another one-off reset of stored
+preferences, and it can only be validated on a real door.
+
 ### Features
 - [ ] Manual mode with automatic unlocking on detected movement
 - [ ] Save position (open/closed) to flash
