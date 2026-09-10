@@ -61,9 +61,53 @@ function fromBytes(buffer) {
 var cesam =
 {
     serviceUUID: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
-    buttonCharacteristic: '6e400002-b5a3-f393-e0a9-e50e24dcca9e', // transmit is from the phone's perspective
-    speedCharacteristic: '6e400003-b5a3-f393-e0a9-e50e24dcca9e'
+    buttonCharacteristic: '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
+    speedCharacteristic: '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
+    nameCharacteristic: '6e400004-b5a3-f393-e0a9-e50e24dcca9e',
+    stateCharacteristic: '6e400005-b5a3-f393-e0a9-e50e24dcca9e',
+
+    scanSeconds: 5,
+    maxNameLength: 29, // MAX_NAME_LEN in the firmware: what fits in the scan response
+
+    CMD_OPEN: "0",
+    CMD_CLOSE: "1",
+    CMD_REFRESH: "2",
+    CMD_PAUSE: "3",
+
+    // values of the state characteristic, a raw byte (DOOR_STATE_* in the firmware).
+    // "Ouverte" and "Fermée" mean a travel ran to completion, not a measured position:
+    // the board has no limit switch and infers the end of travel from the IMU.
+    doorStates: {
+        0: "Démarrage",
+        1: "Position inconnue",
+        2: "Ouverte",
+        3: "Fermée",
+        4: "En pause",
+        5: "Ouverture…",
+        6: "Fermeture…"
+    },
+
+    // speed is a single byte, and wraps around instead of saturating
+    SPEED_MIN: 5,
+    SPEED_MAX: 255,
+    SPEED_STEP: 25
 };
+
+
+// Every discovered peripheral, keyed by its BLE id (a MAC address on Android).
+// Several of them may be connected at the same time, so all per-device state -
+// connection state and current speed included - lives here rather than in the DOM.
+//
+// {
+//   id, name, rssi,
+//   state:     "disconnected" | "connecting" | "connected",
+//   doorState: the last state notified by the board, or null while unknown,
+//   speed:     the last speed notified by the board, or null while unknown,
+//   nameDraft: what the user is currently typing in the rename field, or null,
+//   status:    a short message shown under the device name, or null
+// }
+var devices = {};
+
 
 var app =
 {
@@ -71,27 +115,51 @@ var app =
     {
         setTimeout(() => {  $("#index").remove()}, 2000);
         document.addEventListener("deviceready", app.onDeviceReady, false);
-//        $("#refreshButton").on("click", app.disconnect);
-//        $("#refreshButton").on("click", app.refreshDeviceList);
-        $("#openButton").on("click", app.open);
-        $("#closeButton").on("click", app.close);
-        $("#disconnectButton").on("click", app.disconnect);
-        document.getElementById("command-panel").style.display = "none";
-        $("#speedMinus").on("click", function() {
-            app.incrementSpeed(-25);
+
+        // Handlers are delegated to #deviceList: device rows are re-rendered on every
+        // state change, so binding directly on them would not survive a redraw.
+        var list = $("#deviceList");
+        list.on("click", ".device-header", function() {
+            app.connect(app.deviceIdOf(this));
         });
-        $("#speedPlus").on("click", function() {
-                    app.incrementSpeed(25);
+        list.on("click", ".openButton", function() {
+            app.sendCommand(app.deviceIdOf(this), cesam.CMD_OPEN);
         });
+        list.on("click", ".closeButton", function() {
+            app.sendCommand(app.deviceIdOf(this), cesam.CMD_CLOSE);
+        });
+        list.on("click", ".pauseButton", function() {
+            app.sendCommand(app.deviceIdOf(this), cesam.CMD_PAUSE);
+        });
+        list.on("click", ".speedMinus", function() {
+            app.incrementSpeed(app.deviceIdOf(this), -cesam.SPEED_STEP);
+        });
+        list.on("click", ".speedPlus", function() {
+            app.incrementSpeed(app.deviceIdOf(this), cesam.SPEED_STEP);
+        });
+        list.on("click", ".renameButton", function() {
+            app.rename(app.deviceIdOf(this));
+        });
+        list.on("click", ".disconnectButton", function() {
+            app.disconnect(app.deviceIdOf(this));
+        });
+        // kept out of the device state so a redraw does not wipe what is being typed
+        list.on("input", ".nameInput", function() {
+            var device = devices[app.deviceIdOf(this)];
+
+            if(device)
+            {
+                device.nameDraft = $(this).val();
+            }
+        });
+
         PullToRefresh.init({
             mainElement: 'body',
             onRefresh: function(){
-                // if no ble peripheral connected, refresh devices list
-                if(!$("#disconnectButton").data("deviceId")) {
-                    app.refreshDeviceList();
-                } else {
-                    app.refresh_ble_peripheral_parameters();
-                }
+                // Rescan and, at the same time, ask every connected board for its
+                // current parameters. Both are safe to do while connections are open.
+                app.refreshDeviceList();
+                app.connectedIds().forEach(app.refreshParameters);
             }
         });
     },
@@ -101,188 +169,461 @@ var app =
         app.refreshDeviceList();
     },
 
-    refreshDeviceList: function()
+    deviceIdOf: function(element)
     {
-        $("#refreshButton").addClass("btnclick");
-        $("#deviceList").html(""); // empties the list
+        return $(element).closest("li.device").attr("data-id");
+    },
 
-        function scan()
-        {
-            ble.scan([cesam.serviceUUID], 5, app.onDiscoverDevice, app.onError);
-            // ble.scan has no "scan finished" callback, so tell the user about an empty
-            // list once the 5 scanning seconds have elapsed
-            setTimeout(function() {
-                if($("#deviceList > li").length === 0)
-                {
-                    $("#deviceList").append(
-                        $("<li/>").addClass("empty")
-                                  .text("Aucun CESAM trouvé. Vérifiez qu'il est allumé, " +
-                                        "puis tirez vers le bas pour relancer la recherche.")
-                    );
-                }
-            }, 5500);
-        }
-
-        ble.isEnabled(scan, function() {
-            $("#deviceList").append(
-                $("<li/>").addClass("empty")
-                          .text("Bluetooth désactivé. Activez-le, puis tirez vers le bas " +
-                                "pour relancer la recherche.")
-            );
+    connectedIds: function()
+    {
+        return Object.keys(devices).filter(function(id) {
+            return devices[id].state === "connected";
         });
     },
 
-    onDiscoverDevice: function(device)
+    refreshDeviceList: function()
     {
-        if(device.name == "CESAM")
+        // A connected peripheral is never reported again by ble.scan (the plugin only
+        // drops non-connected entries from its cache), so connected devices have to be
+        // kept in the list: dropping them here would lose the only handle we have on
+        // them and leave the connection open with no way to close it.
+        Object.keys(devices).forEach(function(id) {
+            if(devices[id].state === "disconnected")
+            {
+                delete devices[id];
+            }
+        });
+        app.render();
+
+        function scan()
         {
-            var listItem = $("<li/>").data("deviceId", device.id)
-                                     .html(device.name + "&nbsp;" +
-                                        "(RSSI: " + device.rssi + "dBm&nbsp;|&nbsp;" +
-                                        device.id + ")")
-                                     .on("click", app.connect);
-            $("#deviceList").append(listItem);
+            ble.scan([cesam.serviceUUID], cesam.scanSeconds, app.onDiscoverDevice,
+                     function(reason) {
+                         console.error("Scan failed: " + JSON.stringify(reason));
+                         app.showListMessage("La recherche a échoué. Tirez vers le bas " +
+                                             "pour réessayer.");
+                     });
+            // ble.scan has no "scan finished" callback, so tell the user about an empty
+            // list once the scanning seconds have elapsed
+            setTimeout(function() {
+                if(Object.keys(devices).length === 0)
+                {
+                    app.showListMessage("Aucun CESAM trouvé. Vérifiez qu'il est allumé, " +
+                                        "puis tirez vers le bas pour relancer la recherche.");
+                }
+            }, cesam.scanSeconds * 1000 + 500);
         }
+
+        ble.isEnabled(scan, function() {
+            app.showListMessage("Bluetooth désactivé. Activez-le, puis tirez vers le bas " +
+                                "pour relancer la recherche.");
+        });
     },
 
-    connect: function(e)
+    // ble.scan already filters on the service UUID, so everything reported here is a
+    // CESAM. Filtering on the name again would break as soon as a board is renamed.
+    onDiscoverDevice: function(device)
     {
-        var target = $(e.target)
-        var deviceId = $(e.target).data("deviceId")
-        target.addClass("connection")
+        if(devices[device.id])
+        {
+            devices[device.id].rssi = device.rssi;
+            devices[device.id].name = device.name || devices[device.id].name;
+        }
+        else
+        {
+            devices[device.id] = {
+                id: device.id,
+                name: device.name || "CESAM",
+                rssi: device.rssi,
+                state: "disconnected",
+                doorState: null,
+                speed: null,
+                nameDraft: null,
+                status: null
+            };
+        }
+        app.render();
+    },
+
+    connect: function(deviceId)
+    {
+        var device = devices[deviceId];
+
+        // Only connect an idle device. Marking it "connecting" right now - and not in
+        // the connect callback, which lands a second or two later - is what keeps a
+        // double tap from opening two connections to the same board.
+        if(!device || device.state !== "disconnected")
+        {
+            return;
+        }
+
+        device.state = "connecting";
+        device.status = null;
+        app.render();
 
         function onConnect(peripheral)
         {
-            //app.determineWriteType(peripheral);
+            device.state = "connected";
+            device.status = null;
+            app.render();
+
             // subscribe for incoming data from speed
-            ble.startNotification(deviceId, cesam.serviceUUID, cesam.speedCharacteristic, app.onData, app.onError);
-            $("#disconnectButton").data("deviceId", deviceId);
-            $("#disconnectButton").show();
-            target.removeClass("connection");
-            target.addClass("connected");
-            document.getElementById("command-panel").style.display = "block";
+            ble.startNotification(deviceId, cesam.serviceUUID, cesam.speedCharacteristic,
+                function(data) {
+                    app.onSpeedData(deviceId, data);
+                },
+                function(reason) {
+                    console.error("Speed notifications failed on " + deviceId + ": " +
+                                  JSON.stringify(reason));
+                    device.status = "Vitesse non disponible";
+                    app.render();
+                });
+
+            // and from the door state
+            ble.startNotification(deviceId, cesam.serviceUUID, cesam.stateCharacteristic,
+                function(data) {
+                    app.onStateData(deviceId, data);
+                },
+                function(reason) {
+                    console.error("State notifications failed on " + deviceId + ": " +
+                                  JSON.stringify(reason));
+                    device.status = "État non disponible";
+                    app.render();
+                });
+
+            // the advertised name may be stale if the board was renamed from another
+            // phone, so take it from the board itself
+            ble.read(deviceId, cesam.serviceUUID, cesam.nameCharacteristic,
+                function(data) {
+                    device.name = bytesToString(data);
+                    app.render();
+                },
+                function(reason) {
+                    console.error("Name read failed on " + deviceId + ": " +
+                                  JSON.stringify(reason));
+                });
+
+            app.refreshParameters(deviceId);
         }
 
-        // If not already connected, connect to the selected device
-        if(!$("#disconnectButton").data("deviceId"))
+        // The third callback is not just a failure callback: the plugin also calls it
+        // later on, when the peripheral itself drops the connection. Either way it
+        // concerns this device only - it must never tear down the other connections.
+        function onDisconnect(reason)
         {
-            console.log("BLE NOT ALREADY CONNECTED, CONNECTING...");
-            ble.connect(deviceId, onConnect, app.onError);
-            setTimeout(() => app.refresh_ble_peripheral_parameters(), 3000);
+            console.log("Disconnected from " + deviceId + ": " + JSON.stringify(reason));
+            device.status = (device.state === "connected") ? "Connexion perdue"
+                                                           : "Connexion impossible";
+            app.disconnected(deviceId);
+        }
+
+        ble.connect(deviceId, onConnect, onDisconnect);
+    },
+
+    disconnect: function(deviceId)
+    {
+        var device = devices[deviceId];
+
+        if(!device || device.state === "disconnected")
+        {
+            return;
+        }
+
+        // The plugin does not call the disconnect callback when the app is the one
+        // closing the connection, so the state is updated here.
+        ble.disconnect(deviceId,
+            function() {
+                app.disconnected(deviceId);
+            },
+            function(reason) {
+                console.error("Disconnect failed on " + deviceId + ": " +
+                              JSON.stringify(reason));
+                app.disconnected(deviceId);
+            });
+    },
+
+    disconnected: function(deviceId)
+    {
+        var device = devices[deviceId];
+
+        if(!device)
+        {
+            return;
+        }
+
+        device.state = "disconnected";
+        device.speed = null;
+        device.doorState = null;
+        device.nameDraft = null;
+        app.render();
+    },
+
+    // Update a single field of one device rather than redrawing. A notification can land
+    // while the user is pressing a button or typing a name, and a full redraw would
+    // rebuild the element under their finger - swallowing the tap, or losing the text.
+    updateField: function(deviceId, fieldClass, text)
+    {
+        var field = $("#deviceList > li.device[data-id='" + deviceId + "'] ." + fieldClass);
+
+        if(field.length)
+        {
+            field.text(text);
+        }
+        else
+        {
+            app.render();
         }
     },
 
-
-    onData: function(data)
+    onSpeedData: function(deviceId, data)
     {
-        var rspeed = fromBytes(data);
-        console.log("Speed received : " + rspeed);
-        document.getElementById("settingSpeed").innerHTML=rspeed;
+        var device = devices[deviceId];
+
+        if(!device)
+        {
+            return;
+        }
+
+        device.speed = fromBytes(data);
+        console.log("Speed received from " + deviceId + " : " + device.speed);
+        app.updateField(deviceId, "deviceSpeed", device.speed);
     },
 
-    sendData: function(data)
+    onStateData: function(deviceId, data)
     {
-        var deviceId = $("#disconnectButton").data("deviceId");
+        var device = devices[deviceId];
 
-        function success()
+        if(!device)
         {
-        };
+            return;
+        }
 
-        function failure(reason)
-        {
-            alert("Failed writing data to CESAM " + JSON.stringify(reason));
-        };
+        device.doorState = fromBytes(data);
+        console.log("State received from " + deviceId + " : " + device.doorState);
+        app.updateField(deviceId, "deviceState", app.doorStateLabel(device));
+    },
 
-        if(deviceId)
+    doorStateLabel: function(device)
+    {
+        if(device.doorState === null)
         {
-            ble.write(
-                deviceId,
-                cesam.serviceUUID,
-                cesam.buttonCharacteristic,
-                stringToBytes(data), success, failure
-            );
+            return "NC";
+        }
+
+        // an unknown value means the board runs a firmware this app does not know about
+        return cesam.doorStates[device.doorState] || ("Inconnu (" + device.doorState + ")");
+    },
+
+    rename: function(deviceId)
+    {
+        var device = devices[deviceId];
+
+        if(!device || device.state !== "connected" || device.nameDraft === null)
+        {
+            return;
+        }
+
+        var newName = device.nameDraft.trim();
+
+        if(newName.length === 0 || newName === device.name)
+        {
+            device.nameDraft = null;
+            app.render();
+            return;
+        }
+
+        ble.write(deviceId, cesam.serviceUUID, cesam.nameCharacteristic,
+            stringToBytes(newName.slice(0, cesam.maxNameLength)),
+            function() {
+                // read back what the board actually stored rather than assuming
+                ble.read(deviceId, cesam.serviceUUID, cesam.nameCharacteristic,
+                    function(data) {
+                        device.name = bytesToString(data);
+                        device.nameDraft = null;
+                        app.render();
+                    },
+                    function() {
+                        device.nameDraft = null;
+                        app.render();
+                    });
+            },
+            function(reason) {
+                console.error("Rename failed on " + deviceId + ": " + JSON.stringify(reason));
+                device.status = "Renommage impossible";
+                app.render();
+            });
+    },
+
+    sendCommand: function(deviceId, command)
+    {
+        var device = devices[deviceId];
+
+        if(!device || device.state !== "connected")
+        {
+            return;
+        }
+
+        ble.write(deviceId, cesam.serviceUUID, cesam.buttonCharacteristic,
+            stringToBytes(command),
+            function() {
+                // a command got through, so any previous error message is stale
+                if(device.status)
+                {
+                    device.status = null;
+                    app.render();
+                }
+            },
+            function(reason) {
+                console.error("Write failed on " + deviceId + ": " + JSON.stringify(reason));
+                device.status = "Commande non transmise";
+                app.render();
+            });
+    },
+
+    // Ask the board to send its parameters back over the speed notification
+    refreshParameters: function(deviceId)
+    {
+        app.sendCommand(deviceId, cesam.CMD_REFRESH);
+    },
+
+    incrementSpeed: function(deviceId, incr)
+    {
+        var device = devices[deviceId];
+
+        if(!device || device.state !== "connected")
+        {
+            return;
+        }
+
+        // Taken from this device's own state: reading it back from the DOM would pick
+        // up whichever board notified last.
+        var speed = (device.speed === null) ? cesam.SPEED_MAX : device.speed;
+        var newspeed = speed + incr;
+
+        if((incr < 0) && (speed < -incr + 1))
+        {
+            newspeed = cesam.SPEED_MAX;
+        }
+        else if((incr > 0) && (speed > cesam.SPEED_MAX - incr))
+        {
+            newspeed = cesam.SPEED_MIN;
+        }
+
+        ble.write(deviceId, cesam.serviceUUID, cesam.speedCharacteristic,
+            toBytes(newspeed),
+            function() {
+                // Ask hardware to send updated values
+                app.refreshParameters(deviceId);
+            },
+            function(reason) {
+                console.error("Speed write failed on " + deviceId + ": " +
+                              JSON.stringify(reason));
+                device.status = "Vitesse non transmise";
+                app.render();
+            });
+    },
+
+    showListMessage: function(message)
+    {
+        if(Object.keys(devices).length === 0)
+        {
+            $("#deviceList").html($("<li/>").addClass("empty").text(message));
         }
     },
 
-    open: function(event)
+    render: function()
     {
-        $("#openButton").addClass("btnclick");
-        app.sendData("0");
+        var list = $("#deviceList");
+        var ids = Object.keys(devices);
+
+        list.empty();
+
+        ids.forEach(function(id) {
+            list.append(app.renderDevice(devices[id]));
+        });
     },
 
-    close: function(event)
+    renderDevice: function(device)
     {
-        $("#closeButton").addClass("btnclick");
-        app.sendData("1");
-    },
+        var item = $("<li/>").addClass("device").attr("data-id", device.id);
+        var header = $("<div/>").addClass("device-header").appendTo(item);
 
-    refresh_ble_peripheral_parameters: function(event) {
-        app.sendData("2");
-    },
+        // Boards all advertise the same name, so the id is what tells them apart
+        $("<span/>").addClass("device-name")
+                    .text(device.name + " (" + device.id + ")")
+                    .appendTo(header);
 
-    incrementSpeed: function(incr) {
-        var deviceId = $("#disconnectButton").data("deviceId");
+        var status;
 
-        function success()
+        if(device.state === "connecting")
         {
-            // Ask hardware to send updated values
-            app.refresh_ble_peripheral_parameters();
-        };
-
-        function failure(reason)
+            status = "Connexion…";
+        }
+        else if(device.state === "connected")
         {
-            alert("Failed writing speed to CESAM, error code: " + JSON.stringify(reason));
-        };
-
-        if(deviceId)
+            status = device.status || "Connecté";
+        }
+        else
         {
-            var speed = parseInt(document.getElementById("settingSpeed").innerHTML);
-            if (isNaN(speed)) {
-                speed = 255;
+            // keep the row advertised as tappable even when it carries an error
+            status = device.status ? device.status + " · Appuyer pour reconnecter"
+                                   : "Appuyer pour connecter";
+
+            if(device.rssi !== undefined)
+            {
+                status += " · RSSI " + device.rssi + " dBm";
             }
-            var newspeed = speed + parseInt(incr);
-            if ((incr < 0) && (speed < -incr + 1)) {
-                newspeed = 255;
-            }
-            else if ((incr > 0) && (speed > 255 - incr)) {
-                newspeed = 5;
-            }
-            ble.write(
-                deviceId,
-                cesam.serviceUUID,
-                cesam.speedCharacteristic,
-                toBytes(newspeed), success, failure
-            );
         }
-    },
 
-    disconnect: function(event)
-    {
-        $("#disconnectButton").addClass("btnclick");
-        var deviceId = $("#disconnectButton").data("deviceId");
+        $("<span/>").addClass("device-status")
+                    .addClass(device.state === "connected" ? "connected" :
+                              device.state === "connecting" ? "connection" : "")
+                    .text(status)
+                    .appendTo(header);
 
-        if(deviceId)
+        if(device.state === "connected")
         {
-            console.log(deviceId + ' disconnected');
-            ble.disconnect(deviceId, app.disconnected, app.onError);
+            item.append(app.renderCommandPanel(device));
         }
+
+        return item;
     },
 
-    disconnected: function()
+    renderCommandPanel: function(device)
     {
-        $("#deviceList > li").removeClass("connected");
-        $("#disconnectButton").data("deviceId", null);
-        $("#disconnectButton").hide();
-        document.getElementById("command-panel").style.display = "none";
-    },
+        var panel = $("<div/>").addClass("command device-panel");
 
-    onError: function(reason)
-    {
-        alert("ERROR: " + JSON.stringify(reason)); // real apps should use notification.alert
-        app.disconnect();
-        app.disconnected();
+        $("<button/>").addClass("openButton").text("Ouvrir").appendTo(panel);
+        $("<button/>").addClass("closeButton").text("Fermer").appendTo(panel);
+        $("<button/>").addClass("pauseButton").text("Pause").appendTo(panel);
 
-    },
+        var stateRow = $("<div/>").addClass("row").appendTo(panel);
+        $("<span/>").addClass("label").text("État : ").appendTo(stateRow);
+        $("<span/>").addClass("deviceState")
+                    .text(app.doorStateLabel(device))
+                    .appendTo(stateRow);
+
+        var speedRow = $("<div/>").addClass("row").appendTo(panel);
+        $("<span/>").addClass("label").text("Vitesse : ").appendTo(speedRow);
+        $("<span/>").addClass("deviceSpeed")
+                    .text(device.speed === null ? "NC" : device.speed)
+                    .appendTo(speedRow);
+        $("<button/>").addClass("speedMinus settingButton").text("-").appendTo(speedRow);
+        $("<button/>").addClass("speedPlus settingButton").text("+").appendTo(speedRow);
+
+        var nameRow = $("<div/>").addClass("row").appendTo(panel);
+        $("<span/>").addClass("label").text("Nom : ").appendTo(nameRow);
+        $("<input/>").addClass("nameInput")
+                     .attr("type", "text")
+                     .attr("maxlength", cesam.maxNameLength)
+                     .val(device.nameDraft === null ? device.name : device.nameDraft)
+                     .appendTo(nameRow);
+        $("<button/>").addClass("renameButton settingButton").text("OK").appendTo(nameRow);
+
+        $("<button/>").addClass("disconnectButton").text("Déconnecter").appendTo(panel);
+
+        return panel;
+    }
 };
 
 app.initialize();

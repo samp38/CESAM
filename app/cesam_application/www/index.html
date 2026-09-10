@@ -24,24 +24,9 @@
     <img id="logo" src="img/logoCESAM.png"/>
     <h2>Appareils disponibles</h2>
     <div id="bluetooth">
+        <!-- One entry per discovered CESAM, each carrying its own command panel once
+             connected. Built by js/index.js - several boards can be connected at once. -->
         <ul id="deviceList"></ul>
-<!--        <button id="refreshButton">Rafraîchir</button>-->
-        <button id="disconnectButton" style="display:none;">Déconnecter</button>
-    </div>
-    <div id="command-panel">
-        <h2>Commande</h2>
-        <div class="command">
-            <button id="openButton">Ouvrir</button>
-            <button id="closeButton">Fermer</button>
-        </div>
-        <h2>Paramètres</h2>
-        <div class="command">
-            <div class="row">
-                <span class="label">Vitesse : </span><span id="settingSpeed">NC</span>
-                    <button id="speedMinus" class="settingButton">-</button>
-                    <button id="speedPlus" class="settingButton">+</button>
-            </div>
-        </div>
     </div>
 </div>
 

@@ -13,21 +13,36 @@ The CESAM system uses a state machine to manage the motorized opening/closing of
        │ Init IMU, BLE, Storage
        ▼
 ┌─────────────┐
-│   Stopped   │◄─────────────┐
-└──────┬──────┘              │
-       │                     │
-       │ BLE: Open ('0')     │ Timeout (1s no movement)
-       ▼                     │
-┌─────────────┐              │
-│   Opening   ├──────────────┤
-└──────┬──────┘              │
-       │                     │
-       │ BLE: Close ('1')    │
-       ▼                     │
-┌─────────────┐              │
-│   Closing   ├──────────────┘
-└─────────────┘
+│   Unknown   │
+└──────┬──────┘
+       │
+       │              ┌─────────────┐
+       ├─────────────►│   Opening   │
+       │ BLE: '0'     └──────┬──────┘
+       │                     │ Timeout (1s no movement)
+       │                     ▼
+       │              ┌─────────────┐
+       │              │    Open     │
+       │              └──────┬──────┘
+       │                     │ BLE: '1'
+       │                     ▼
+       │              ┌─────────────┐
+       └─────────────►│   Closing   │
+         BLE: '1'     └──────┬──────┘
+                             │ Timeout (1s no movement)
+                             ▼
+                      ┌─────────────┐
+                      │   Closed    │
+                      └─────────────┘
+
+BLE: '3' from Opening or Closing ────► Paused
 ```
+
+`Unknown`, `Open`, `Closed` and `Paused` are the door at rest. They share one class,
+`RestingState`, instantiated four times: what differs is only the value reported to the
+app, and the state the machine transitions to *is* the reason the door stopped, so there
+is no separate field to keep in sync. Any of them accepts `'0'` and `'1'` to start a new
+travel.
 
 ## States
 
@@ -38,16 +53,26 @@ The CESAM system uses a state machine to manage the motorized opening/closing of
 **Actions**:
 - Initialize IMU with automatic gyroscope calibration
 - Load preferences from flash (motor speed)
-- Initialize BLE (name: "CESAM")
+- Initialize BLE, advertising the name stored in flash (default: "CESAM_DOOR")
 - Stop motor for safety
 
-**Transition**: → `StoppedState` automatically after init
+**Transition**: → `RestingState(UNKNOWN)` automatically after init
 
 ---
 
-### 2. StoppedState
+### 2. RestingState
 
-**Role**: Idle state, motor stopped, waiting for BLE commands
+**Role**: Door at rest, motor stopped, waiting for BLE commands
+
+Instantiated four times, one per reason the door came to rest. The instance is what the
+app is told on the state characteristic:
+
+| Instance | Reported | Reached from |
+|----------|----------|--------------|
+| `unknownState` | `DOOR_STATE_UNKNOWN` (1) | end of startup, no travel completed yet |
+| `openState` | `DOOR_STATE_OPEN` (2) | `OpeningState` ran to completion |
+| `closedState` | `DOOR_STATE_CLOSED` (3) | `ClosingState` ran to completion |
+| `pausedState` | `DOOR_STATE_PAUSED` (4) | BLE command '3' during a travel |
 
 **Actions**:
 - Motor stopped
@@ -56,7 +81,14 @@ The CESAM system uses a state machine to manage the motorized opening/closing of
 **Transitions**:
 - BLE command '0' → `OpeningState`
 - BLE command '1' → `ClosingState`
-- BLE command '2' → Refresh (stays in StoppedState)
+- BLE command '2' → Refresh (stays put)
+- BLE command '3' → `pausedState`
+
+> `OPEN` and `CLOSED` report that a travel ran to completion, **not** a measured
+> position: there is no limit switch, the end of travel is inferred from the IMU no
+> longer seeing rotation. A door jammed mid-travel therefore also reports `OPEN` or
+> `CLOSED`. Distinguishing the two needs motor current measurement — see
+> [Future Improvements](#future-improvements).
 
 ---
 
@@ -78,9 +110,9 @@ The CESAM system uses a state machine to manage the motorized opening/closing of
 - Stop motor
 
 **Transitions**:
-- 1s timeout without movement → `StoppedState`
+- 1s timeout without movement → `openState`
 - BLE command '1' → `ClosingState` (manual reversal)
-- BLE command → `StoppedState` (emergency stop)
+- BLE command '3' → `pausedState` (emergency stop)
 
 ---
 
@@ -91,9 +123,9 @@ The CESAM system uses a state machine to manage the motorized opening/closing of
 **Actions**: Identical to `OpeningState` but reversed rotation direction
 
 **Transitions**:
-- 1s timeout without movement → `StoppedState`
+- 1s timeout without movement → `closedState`
 - BLE command '0' → `OpeningState` (manual reversal)
-- BLE command → `StoppedState` (emergency stop)
+- BLE command '3' → `pausedState` (emergency stop)
 
 ---
 
@@ -131,15 +163,51 @@ We use the sum of absolute values from all 3 axes to detect any rotation, regard
 
 ## BLE Commands
 
+**Service UUID**: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
+
+| Characteristic | UUID suffix | Properties | Payload |
+|----------------|-------------|------------|---------|
+| Commands | `...0002` | Write | 1 byte, **ASCII** |
+| Speed | `...0003` | Read, Write, Notify | 1 byte, raw |
+| Name | `...0004` | Read, Write | up to 29 chars |
+| State | `...0005` | Read, Notify | 1 byte, raw enum |
+
+Note the asymmetry: commands are ASCII characters, everything else is raw bytes. The
+commands are kept in ASCII because they read directly in the serial logs.
+
+### Commands (`...0002`)
+
 | Command | ASCII Code | Action |
 |---------|------------|--------|
 | Open | `'0'` (48) | Start opening |
 | Close | `'1'` (49) | Start closing |
-| Refresh | `'2'` (50) | Return current motor speed |
+| Refresh | `'2'` (50) | Push current motor speed **and** current state |
+| Pause | `'3'` (51) | Stop the motor where it is → `pausedState` |
 
-**Service UUID**: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`  
-**Characteristic UUID (commands)**: `6e400002-b5a3-f393-e0a9-e50e24dcca9e`  
-**Characteristic UUID (speed)**: `6e400003-b5a3-f393-e0a9-e50e24dcca9e`
+### State (`...0005`)
+
+Notified from the single transition point of the state machine, so every change is
+reported — including the ones the app did not ask for, such as an end of travel. Since a
+board may sit in the same state for a long time, the app has no way of learning the
+current state right after connecting: that is what `'2'` is for.
+
+| Value | Name | Meaning |
+|-------|------|---------|
+| 0 | `DOOR_STATE_STARTUP` | initialising |
+| 1 | `DOOR_STATE_UNKNOWN` | at rest, no travel completed since boot |
+| 2 | `DOOR_STATE_OPEN` | opening travel ran to completion |
+| 3 | `DOOR_STATE_CLOSED` | closing travel ran to completion |
+| 4 | `DOOR_STATE_PAUSED` | stopped part-way by a pause command |
+| 5 | `DOOR_STATE_OPENING` | opening in progress |
+| 6 | `DOOR_STATE_CLOSING` | closing in progress |
+
+### Name (`...0004`)
+
+The door name lives in flash (`pref_doorName`) and is advertised in the **scan
+response** — not in the advertising packet, which the 128-bit service UUID nearly fills.
+That caps it at `MAX_NAME_LEN` = 29 characters. Writing this characteristic renames the
+board and restarts advertising; the board echoes back what it actually stored, which may
+have been truncated. This is what lets the app tell several boards apart.
 
 ---
 

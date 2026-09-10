@@ -218,8 +218,63 @@ button:active{
     text-align: left;
 }
 
-#deviceList > li.empty {
+#deviceList {
     list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+#deviceList > li.empty {
     font-style: italic;
     opacity: 0.7;
+    margin: 4% 5%;
+}
+
+#deviceList > li.device {
+    margin: 4% 5%;
+    padding: 3%;
+    background-color: #2a2a2a;
+    border-radius: 8px;
+}
+
+.device-header {
+    cursor: pointer;
+}
+
+.device-name {
+    display: block;
+    font-weight: bold;
+    word-break: break-all;
+}
+
+.device-status {
+    display: block;
+    margin-top: 0.4em;
+    opacity: 0.8;
+}
+
+/* the panel is already inside a device card, so it does not need its own margin */
+#deviceList .device-panel {
+    margin: 3% 0 0 0;
+    max-width: 100%;
+    text-align: center;
+}
+
+#deviceList .device-panel .row {
+    margin-top: 2%;
+}
+
+#deviceList .device-panel .disconnectButton {
+    width: 12em;
+}
+
+#deviceList .device-panel .nameInput {
+    width: 9em;
+    padding: 0.3em;
+    border: none;
+    border-radius: 4px;
+    background-color: #444;
+    color: #EEE;
+    font-family: inherit;
+    font-size: inherit;
 }

@@ -12,7 +12,11 @@
 #endif
 
 #define DEFAULT_SPEED 255
-#define DEFAULT_NAME "CESAM_DOOR"
+#define DEFAULT_NAME_PREFIX "CESAM"
+
+// The name is advertised in the scan response, whose payload is 31 bytes: one length
+// byte and one type byte precede it, so 29 characters are all that fit.
+#define MAX_NAME_LEN 29
 
 typedef struct {
   char pref_doorName[64];
@@ -26,7 +30,32 @@ bool Storage_WritePrefs();
 void Storage_SetDefaults();
 uint8_t Storage_GetSpeed();
 void Storage_SetSpeed(uint8_t speed);
+const char* Storage_GetName();
+void Storage_SetName(const char* name);
+void Storage_Process();
 void Storage_PrintPrefs();
+
+// Both supported boards are nRF52840, so this is board-independent.
+//
+// A board with nothing in flash yet names itself after its factory device ID, so that
+// several fresh boards can be told apart in the app before anyone renames them. The BLE
+// address would read better but is not available yet: defaults are applied during
+// startup, before BLE_Init().
+static void Storage_DefaultName(char* out, size_t size) {
+    snprintf(out, size, "%s-%08lX", DEFAULT_NAME_PREFIX,
+             (unsigned long) NRF_FICR->DEVICEID[1]);
+}
+
+// Run on whatever came back from flash. A record written by a firmware that never set a
+// name, or a truncated read, would otherwise leave the board advertising an empty or
+// unterminated string.
+static void Storage_EnsureName(char* name, size_t size) {
+    name[size - 1] = '\0';
+
+    if (name[0] == '\0') {
+        Storage_DefaultName(name, size);
+    }
+}
 
 // Implementation
 #ifdef NANO_33_BLE
@@ -54,6 +83,7 @@ bool Storage_ReadPrefs() {
     int rc = myFlashPrefs.readPrefs(&globalPrefs, sizeof(globalPrefs));
     if (rc == FDS_SUCCESS) {
         Serial.println("Storage read SUCCESS");
+        Storage_EnsureName(globalPrefs.pref_doorName, sizeof(globalPrefs.pref_doorName));
         Storage_PrintPrefs();
         return true;
     }
@@ -91,7 +121,7 @@ bool Storage_WritePrefs() {
 
 void Storage_SetDefaults() {
     globalPrefs.speed = DEFAULT_SPEED;
-    strcpy(globalPrefs.pref_doorName, DEFAULT_NAME);
+    Storage_DefaultName(globalPrefs.pref_doorName, sizeof(globalPrefs.pref_doorName));
 }
 
 uint8_t Storage_GetSpeed() {
@@ -103,6 +133,19 @@ void Storage_SetSpeed(uint8_t speed) {
     Serial.println(speed);
     globalPrefs.speed = speed;
     pending_speed = speed;
+    write_pending = true;
+    last_write_time = millis();
+}
+
+const char* Storage_GetName() {
+    return globalPrefs.pref_doorName;
+}
+
+void Storage_SetName(const char* name) {
+    Serial.print("Storage_SetName called with: ");
+    Serial.println(name);
+    strncpy(globalPrefs.pref_doorName, name, MAX_NAME_LEN);
+    globalPrefs.pref_doorName[MAX_NAME_LEN] = '\0';
     write_pending = true;
     last_write_time = millis();
 }
@@ -122,6 +165,8 @@ using namespace Adafruit_LittleFS_Namespace;
 #define PREFS_FILENAME "/prefs.dat"
 static File file(InternalFS);
 static flashPrefs globalPrefs;
+static unsigned long last_write_time = 0;
+static bool write_pending = false;
 
 void Storage_Init() {
     InternalFS.begin();
@@ -145,6 +190,7 @@ bool Storage_ReadPrefs() {
         file.close();
         if (readlen == sizeof(globalPrefs)) {
             Serial.println("Storage read SUCCESS");
+            Storage_EnsureName(globalPrefs.pref_doorName, sizeof(globalPrefs.pref_doorName));
             Storage_PrintPrefs();
             return true;
         }
@@ -171,7 +217,7 @@ bool Storage_WritePrefs() {
 
 void Storage_SetDefaults() {
     globalPrefs.speed = DEFAULT_SPEED;
-    strcpy(globalPrefs.pref_doorName, DEFAULT_NAME);
+    Storage_DefaultName(globalPrefs.pref_doorName, sizeof(globalPrefs.pref_doorName));
 }
 
 uint8_t Storage_GetSpeed() {
@@ -182,6 +228,29 @@ void Storage_SetSpeed(uint8_t speed) {
     Serial.print("Storage_SetSpeed called with: ");
     Serial.println(speed);
     globalPrefs.speed = speed;
+    write_pending = true;
+    last_write_time = millis();
+}
+
+const char* Storage_GetName() {
+    return globalPrefs.pref_doorName;
+}
+
+void Storage_SetName(const char* name) {
+    Serial.print("Storage_SetName called with: ");
+    Serial.println(name);
+    strncpy(globalPrefs.pref_doorName, name, MAX_NAME_LEN);
+    globalPrefs.pref_doorName[MAX_NAME_LEN] = '\0';
+    write_pending = true;
+    last_write_time = millis();
+}
+
+void Storage_Process() {
+    if (write_pending && (millis() - last_write_time > 3000)) {
+        // Écrire seulement si pas de changement depuis 2s
+        write_pending = false;
+        Storage_WritePrefs();
+    }
 }
 
 #endif

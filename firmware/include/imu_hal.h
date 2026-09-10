@@ -13,6 +13,7 @@
 // Public API
 bool IMU_Init();
 bool IMU_GyroscopeAvailable();
+bool IMU_AccelerometerAvailable();
 void IMU_ReadGyroscope(float &x, float &y, float &z);
 
 // Common variables and functions
@@ -116,6 +117,10 @@ bool IMU_Init() {
 }
 
 bool IMU_GyroscopeAvailable() {
+    return true; // LSM6DS33 always has data when polled
+}
+
+bool IMU_AccelerometerAvailable() {
     return true; // LSM6DS33 always has data when polled
 }
 
