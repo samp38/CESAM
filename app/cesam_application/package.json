@@ -15,7 +15,7 @@
   "devDependencies": {
     "cordova-android": "^12.0.1",
     "cordova-custom-config": "^5.1.1",
-    "cordova-plugin-ble-central": "github:don/cordova-plugin-ble-central",
+    "cordova-plugin-ble-central": "2.0.0-slim",
     "cordova-plugin-whitelist": "^1.3.4",
     "pulltorefreshjs": "^0.1.22"
   },

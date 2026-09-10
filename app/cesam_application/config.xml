@@ -14,6 +14,22 @@
     <preference name="android-targetSdkVersion" value="34" />
     <preference name="android-compileSdkVersion" value="34" />
     <platform name="android">
-       
+        <!-- BLE permissions are declared here rather than by the plugin: we use the "slim"
+             variant of cordova-plugin-ble-central, which ships no Android permission at all,
+             so that we can set the neverForLocation flag on BLUETOOTH_SCAN.
+
+             Without that flag, Android 12+ (API 31+) only delivers BLE scan results if the app
+             also holds a location permission. ACCESS_FINE/COARSE_LOCATION are capped at
+             maxSdkVersion="30", so from Android 12 on the app holds none of them and the scan
+             silently returns zero result - no error, no onScanFailed.
+             See https://developer.android.com/guide/topics/connectivity/bluetooth/permissions -->
+        <config-file target="AndroidManifest.xml" parent="/manifest">
+            <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="28" />
+            <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+            <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+            <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+            <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+            <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+        </config-file>
     </platform>
 </widget>
