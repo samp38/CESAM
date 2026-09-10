@@ -50,3 +50,10 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Release signing. build.json holds the keystore passwords in clear text, and losing
+# the keystore means no future release can update an installed app - keep a backup of
+# it somewhere other than this machine.
+*.jks
+*.keystore
+build.json
