@@ -70,7 +70,7 @@ var app =
     initialize: function()
     {
         setTimeout(() => {  $("#index").remove()}, 2000);
-        document.addEventListener("deviceReady", app.onDeviceReady, false);
+        document.addEventListener("deviceready", app.onDeviceReady, false);
 //        $("#refreshButton").on("click", app.disconnect);
 //        $("#refreshButton").on("click", app.refreshDeviceList);
         $("#openButton").on("click", app.open);
@@ -105,7 +105,31 @@ var app =
     {
         $("#refreshButton").addClass("btnclick");
         $("#deviceList").html(""); // empties the list
-        ble.scan([cesam.serviceUUID], 5, app.onDiscoverDevice, app.onError);
+
+        function scan()
+        {
+            ble.scan([cesam.serviceUUID], 5, app.onDiscoverDevice, app.onError);
+            // ble.scan has no "scan finished" callback, so tell the user about an empty
+            // list once the 5 scanning seconds have elapsed
+            setTimeout(function() {
+                if($("#deviceList > li").length === 0)
+                {
+                    $("#deviceList").append(
+                        $("<li/>").addClass("empty")
+                                  .text("Aucun CESAM trouvé. Vérifiez qu'il est allumé, " +
+                                        "puis tirez vers le bas pour relancer la recherche.")
+                    );
+                }
+            }, 5500);
+        }
+
+        ble.isEnabled(scan, function() {
+            $("#deviceList").append(
+                $("<li/>").addClass("empty")
+                          .text("Bluetooth désactivé. Activez-le, puis tirez vers le bas " +
+                                "pour relancer la recherche.")
+            );
+        });
     },
 
     onDiscoverDevice: function(device)

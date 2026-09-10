@@ -217,3 +217,9 @@ button:active{
 .label {
     text-align: left;
 }
+
+#deviceList > li.empty {
+    list-style: none;
+    font-style: italic;
+    opacity: 0.7;
+}
