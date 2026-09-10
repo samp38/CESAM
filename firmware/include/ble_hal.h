@@ -229,21 +229,6 @@ void doorCharacteristicWrittenHandler(uint16_t conn_hdl, BLECharacteristic* chr,
     }
 }
 
-void reverseCharacteristicWrittenHandler(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
-    if (len != 1) {
-        Serial.print("Reverse: unexpected length: ");
-        Serial.println(len);
-        return;
-    }
-
-    uint8_t reversed = data[0] ? 1 : 0;
-    Serial.print("Reverse written : ");
-    Serial.println(reversed);
-    Storage_SetReversed(reversed);
-    // echo back the normalised value, so the app never shows anything but 0 or 1
-    reverseCharacteristic.write8(reversed);
-}
-
 void nameCharacteristicWrittenHandler(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
     char newName[MAX_NAME_LEN + 1];
     uint16_t copied = (len > MAX_NAME_LEN) ? MAX_NAME_LEN : len;
