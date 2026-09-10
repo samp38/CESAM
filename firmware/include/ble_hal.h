@@ -25,13 +25,53 @@
 #define DOOR_STATE_PAUSED  4  // stopped part-way by a pause command
 #define DOOR_STATE_OPENING 5
 #define DOOR_STATE_CLOSING 6
+#define DOOR_STATE_TIMEOUT 7  // travel cut short by the safety cap, position unknown
+
+// Every persistent setting travels together on characteristic ...0007, as one big-endian
+// block. One characteristic rather than one per setting: adding a parameter then costs a
+// field and two lines of coding, instead of a characteristic, a write handler, a storage
+// pair and a read on the app side - in both board branches.
+//
+//   [0]   speed            1-255
+//   [1]   reversed         0 or 1
+//   [2:3] stopTimeoutMs    milliseconds
+//   [4:5] moveThreshold    tenths of a degree per second
+#define BLE_SETTINGS_LEN 6
 
 // Public API
 bool BLE_Init();
 uint8_t BLE_CheckCommand();
-void BLE_UpdateSpeed(int speed);
+void BLE_UpdateSettings();
 void BLE_UpdateName(const char* name);
 void BLE_UpdateState(uint8_t state);
+
+static void BLE_EncodeSettings(uint8_t out[BLE_SETTINGS_LEN]) {
+    uint16_t timeout = Storage_GetStopTimeoutMs();
+    uint16_t threshold = Storage_GetMoveThreshold();
+
+    out[0] = Storage_GetSpeed();
+    out[1] = Storage_GetReversed();
+    out[2] = (timeout >> 8) & 0xFF;
+    out[3] = timeout & 0xFF;
+    out[4] = (threshold >> 8) & 0xFF;
+    out[5] = threshold & 0xFF;
+}
+
+// The whole block is written at once, so a partial write is refused rather than applied
+// half way. Each setter clamps, which is why the board echoes the block back afterwards.
+static bool BLE_ApplySettings(const uint8_t* data, int len) {
+    if (len != BLE_SETTINGS_LEN) {
+        Serial.print("Settings: unexpected length: ");
+        Serial.println(len);
+        return false;
+    }
+
+    Storage_SetSpeed(data[0]);
+    Storage_SetReversed(data[1]);
+    Storage_SetStopTimeoutMs((uint16_t)((data[2] << 8) | data[3]));
+    Storage_SetMoveThreshold((uint16_t)((data[4] << 8) | data[5]));
+    return true;
+}
 
 // Implementation
 #ifdef NANO_33_BLE
@@ -40,32 +80,24 @@ static BLEService doorService("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
 // write-only: this is a fire-and-forget command channel, and BLE_CheckCommand consumes
 // the value, so reading it back would tell a client nothing
 static BLEByteCharacteristic doorCharacteristic("6e400002-b5a3-f393-e0a9-e50e24dcca9e", BLEWrite);
-static BLEByteCharacteristic speedCharacteristic("6e400003-b5a3-f393-e0a9-e50e24dcca9e", BLERead | BLEWrite | BLENotify);
 static BLEStringCharacteristic nameCharacteristic("6e400004-b5a3-f393-e0a9-e50e24dcca9e", BLERead | BLEWrite, MAX_NAME_LEN);
 static BLEByteCharacteristic stateCharacteristic("6e400005-b5a3-f393-e0a9-e50e24dcca9e", BLERead | BLENotify);
-static BLEByteCharacteristic reverseCharacteristic("6e400006-b5a3-f393-e0a9-e50e24dcca9e", BLERead | BLEWrite);
+static BLECharacteristic settingsCharacteristic("6e400007-b5a3-f393-e0a9-e50e24dcca9e", BLERead | BLEWrite | BLENotify, BLE_SETTINGS_LEN, true);
 
 void blePeripheralConnectHandler(BLEDevice central) {
     Serial.print("Connected event, central: ");
     Serial.println(central.address());
 }
 
-void speedCharacteristicWrittenHandler(BLEDevice central, BLECharacteristic characteristic) {
-    Serial.println("Characteristic written : " + String(characteristic.uuid()));
-    Serial.print("received value : ");
-    int newSpeed = speedCharacteristic.value();
-    Serial.println(newSpeed);
-    Storage_SetSpeed(newSpeed);
-    // Storage_WritePrefs();
-}
+void settingsCharacteristicWrittenHandler(BLEDevice central, BLECharacteristic characteristic) {
+    Serial.println("Settings written");
 
-void reverseCharacteristicWrittenHandler(BLEDevice central, BLECharacteristic characteristic) {
-    uint8_t reversed = reverseCharacteristic.value() ? 1 : 0;
-    Serial.print("Reverse written : ");
-    Serial.println(reversed);
-    Storage_SetReversed(reversed);
-    // echo back the normalised value, so the app never shows anything but 0 or 1
-    reverseCharacteristic.writeValue(reversed);
+    if (BLE_ApplySettings(settingsCharacteristic.value(),
+                          settingsCharacteristic.valueLength())) {
+        // echo the stored block back: the setters clamp, so what the app sent and what
+        // took effect are not necessarily the same
+        BLE_UpdateSettings();
+    }
 }
 
 void nameCharacteristicWrittenHandler(BLEDevice central, BLECharacteristic characteristic) {
@@ -105,19 +137,16 @@ bool BLE_Init() {
     BLE.setLocalName(Storage_GetName());
     BLE.setAdvertisedService(doorService);
     doorService.addCharacteristic(doorCharacteristic);
-    doorService.addCharacteristic(speedCharacteristic);
     doorService.addCharacteristic(nameCharacteristic);
     doorService.addCharacteristic(stateCharacteristic);
-    doorService.addCharacteristic(reverseCharacteristic);
+    doorService.addCharacteristic(settingsCharacteristic);
     BLE.addService(doorService);
-    speedCharacteristic.writeValue(Storage_GetSpeed());
     nameCharacteristic.writeValue(Storage_GetName());
     stateCharacteristic.writeValue(DOOR_STATE_STARTUP);
-    reverseCharacteristic.writeValue(Storage_GetReversed());
+    BLE_UpdateSettings();
     BLE.setEventHandler(BLEConnected, blePeripheralConnectHandler);
-    speedCharacteristic.setEventHandler(BLEWritten, speedCharacteristicWrittenHandler);
     nameCharacteristic.setEventHandler(BLEWritten, nameCharacteristicWrittenHandler);
-    reverseCharacteristic.setEventHandler(BLEWritten, reverseCharacteristicWrittenHandler);
+    settingsCharacteristic.setEventHandler(BLEWritten, settingsCharacteristicWrittenHandler);
     BLE.advertise();
 
     return true;
@@ -131,8 +160,11 @@ uint8_t BLE_CheckCommand() {
     return 0;
 }
 
-void BLE_UpdateSpeed(int speed) {
-    speedCharacteristic.writeValue(speed);
+void BLE_UpdateSettings() {
+    uint8_t block[BLE_SETTINGS_LEN];
+
+    BLE_EncodeSettings(block);
+    settingsCharacteristic.writeValue(block, BLE_SETTINGS_LEN);
 }
 
 void BLE_UpdateState(uint8_t state) {
@@ -145,10 +177,9 @@ void BLE_UpdateState(uint8_t state) {
 
 static BLEService doorService = BLEService("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
 static BLECharacteristic doorCharacteristic = BLECharacteristic("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
-static BLECharacteristic speedCharacteristic = BLECharacteristic("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
+static BLECharacteristic settingsCharacteristic = BLECharacteristic("6e400007-b5a3-f393-e0a9-e50e24dcca9e");
 static BLECharacteristic nameCharacteristic = BLECharacteristic("6e400004-b5a3-f393-e0a9-e50e24dcca9e");
 static BLECharacteristic stateCharacteristic = BLECharacteristic("6e400005-b5a3-f393-e0a9-e50e24dcca9e");
-static BLECharacteristic reverseCharacteristic = BLECharacteristic("6e400006-b5a3-f393-e0a9-e50e24dcca9e");
 
 static uint8_t lastDoorCommand = 0;
 static bool clientSubscribed = false;
@@ -163,42 +194,30 @@ void blePeripheralDisconnectHandler(uint16_t conn_handle, uint8_t reason) {
     clientSubscribed = false;
 }
 
-void speedCccdCallback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t value) {
-    Serial.print("Speed CCCD updated: ");
+void settingsCccdCallback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t value) {
+    Serial.print("Settings CCCD updated: ");
     Serial.println(value);
-    
+
     if (value & 0x0001) {
         Serial.println("Client SUBSCRIBED to notifications");
         clientSubscribed = true;
-        // Envoyer immédiatement la vitesse quand le client s'abonne
+        // Envoyer immédiatement les réglages quand le client s'abonne
         delay(100);
-        BLE_UpdateSpeed(Storage_GetSpeed());
+        BLE_UpdateSettings();
     } else {
         Serial.println("Client UNSUBSCRIBED from notifications");
         clientSubscribed = false;
     }
 }
 
-void speedCharacteristicWrittenHandler(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
-    Serial.print("Speed characteristic written, length: ");
+void settingsCharacteristicWrittenHandler(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
+    Serial.print("Settings written, length: ");
     Serial.println(len);
-    
-    if (len == 1) {
-        int newSpeed = data[0];
-        Serial.print("Received speed value (1 byte): ");
-        Serial.println(newSpeed);
-        Storage_SetSpeed(newSpeed);
-        Storage_WritePrefs();
-    } else if (len == 2) {
-        // Si l'app envoie 2 bytes (big endian)
-        int newSpeed = (data[0] << 8) | data[1];
-        Serial.print("Received speed value (2 bytes): ");
-        Serial.println(newSpeed);
-        Storage_SetSpeed(newSpeed);
-        Storage_WritePrefs();
-    } else {
-        Serial.print("Unexpected length: ");
-        Serial.println(len);
+
+    if (BLE_ApplySettings(data, len)) {
+        // echo the stored block back: the setters clamp, so what the app sent and what
+        // took effect are not necessarily the same
+        BLE_UpdateSettings();
     }
 }
 
@@ -289,30 +308,16 @@ bool BLE_Init() {
     doorCharacteristic.write(&doorInit, 1);
     Serial.println("BLE_Init: Door characteristic configured");
     
-    // Configuration de la caractéristique de vitesse avec notification
-    speedCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE | CHR_PROPS_NOTIFY);
-    speedCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
-    speedCharacteristic.setFixedLen(2);
-    speedCharacteristic.setWriteCallback(speedCharacteristicWrittenHandler);
-    speedCharacteristic.setCccdWriteCallback(speedCccdCallback);  // ← IMPORTANT !
-    speedCharacteristic.begin();
-    
-    // Écrire la vitesse initiale (2 bytes)
-    uint16_t initialSpeed = Storage_GetSpeed();
-    Serial.print("BLE_Init: Initial speed from storage: ");
-    Serial.println(initialSpeed);
-    
-    uint8_t speedBytes[2];
-    speedBytes[0] = (initialSpeed >> 8) & 0xFF;
-    speedBytes[1] = initialSpeed & 0xFF;
-    speedCharacteristic.write(speedBytes, 2);
-    
-    Serial.print("BLE_Init: Speed bytes written: [");
-    Serial.print(speedBytes[0]);
-    Serial.print(", ");
-    Serial.print(speedBytes[1]);
-    Serial.println("]");
-    
+    // Configuration de la caractéristique de réglages avec notification
+    settingsCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE | CHR_PROPS_NOTIFY);
+    settingsCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
+    settingsCharacteristic.setFixedLen(BLE_SETTINGS_LEN);
+    settingsCharacteristic.setWriteCallback(settingsCharacteristicWrittenHandler);
+    settingsCharacteristic.setCccdWriteCallback(settingsCccdCallback);  // ← IMPORTANT !
+    settingsCharacteristic.begin();
+    BLE_UpdateSettings();
+    Serial.println("BLE_Init: Settings characteristic configured");
+
     // Configuration de la caractéristique de nom
     nameCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE);
     nameCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
@@ -330,15 +335,6 @@ bool BLE_Init() {
     stateCharacteristic.write8(DOOR_STATE_STARTUP);
     Serial.println("BLE_Init: State characteristic configured");
 
-    // Configuration de la caractéristique de sens moteur
-    reverseCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE);
-    reverseCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
-    reverseCharacteristic.setFixedLen(1);
-    reverseCharacteristic.setWriteCallback(reverseCharacteristicWrittenHandler);
-    reverseCharacteristic.begin();
-    reverseCharacteristic.write8(Storage_GetReversed());
-    Serial.println("BLE_Init: Reverse characteristic configured");
-
     startAdvertising();
 
     Serial.println("BLE_Init: Advertising started");
@@ -354,26 +350,21 @@ uint8_t BLE_CheckCommand() {
     return 0;
 }
 
-void BLE_UpdateSpeed(int speed) {
+void BLE_UpdateSettings() {
+    uint8_t block[BLE_SETTINGS_LEN];
+
+    BLE_EncodeSettings(block);
+    // keep the readable value up to date even with no subscriber
+    settingsCharacteristic.write(block, BLE_SETTINGS_LEN);
+
     if (!clientSubscribed) {
-        Serial.println("BLE_UpdateSpeed: Client not subscribed, skipping notification");
+        Serial.println("BLE_UpdateSettings: Client not subscribed, skipping notification");
         return;
     }
-    
-    // Envoyer 2 bytes (big endian) pour être compatible avec fromBytes()
-    uint8_t speedBytes[2];
-    speedBytes[0] = (speed >> 8) & 0xFF;  // MSB
-    speedBytes[1] = speed & 0xFF;         // LSB
-    
-    bool success = speedCharacteristic.notify(speedBytes, 2);
-    
-    Serial.print("Speed notification sent: ");
-    Serial.print(speed);
-    Serial.print(" [");
-    Serial.print(speedBytes[0]);
-    Serial.print(", ");
-    Serial.print(speedBytes[1]);
-    Serial.print("] - ");
+
+    bool success = settingsCharacteristic.notify(block, BLE_SETTINGS_LEN);
+
+    Serial.print("Settings notification sent - ");
     Serial.println(success ? "SUCCESS" : "FAILED");
 }
 

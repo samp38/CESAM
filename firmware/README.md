@@ -19,7 +19,7 @@ The CESAM system uses a state machine to manage the motorized opening/closing of
        │              ┌─────────────┐
        ├─────────────►│   Opening   │
        │ BLE: '0'     └──────┬──────┘
-       │                     │ Timeout (1s no movement)
+       │                     │ No movement for stopTimeoutMs
        │                     ▼
        │              ┌─────────────┐
        │              │    Open     │
@@ -29,20 +29,21 @@ The CESAM system uses a state machine to manage the motorized opening/closing of
        │              ┌─────────────┐
        └─────────────►│   Closing   │
          BLE: '1'     └──────┬──────┘
-                             │ Timeout (1s no movement)
+                             │ No movement for stopTimeoutMs
                              ▼
                       ┌─────────────┐
                       │   Closed    │
                       └─────────────┘
 
-BLE: '3' from Opening or Closing ────► Paused
+BLE: '3' from Opening or Closing ─────────────► Paused
+More than MAX_TRAVEL_MS in Opening or Closing ► Timeout
 ```
 
-`Unknown`, `Open`, `Closed` and `Paused` are the door at rest. They share one class,
-`RestingState`, instantiated four times: what differs is only the value reported to the
-app, and the state the machine transitions to *is* the reason the door stopped, so there
-is no separate field to keep in sync. Any of them accepts `'0'` and `'1'` to start a new
-travel.
+`Unknown`, `Open`, `Closed`, `Paused` and `Timeout` are the door at rest. They share one
+class, `RestingState`, instantiated five times: what differs is only the value reported
+to the app, and the state the machine transitions to *is* the reason the door stopped, so
+there is no separate field to keep in sync. Any of them accepts `'0'` and `'1'` to start
+a new travel.
 
 ## States
 
@@ -52,7 +53,7 @@ travel.
 
 **Actions**:
 - Initialize IMU with automatic gyroscope calibration
-- Load preferences from flash (motor speed)
+- Load settings from flash (name, speed, motor direction, stop detection)
 - Initialize BLE, advertising the name stored in flash (default: "CESAM_DOOR")
 - Stop motor for safety
 
@@ -64,7 +65,7 @@ travel.
 
 **Role**: Door at rest, motor stopped, waiting for BLE commands
 
-Instantiated four times, one per reason the door came to rest. The instance is what the
+Instantiated five times, one per reason the door came to rest. The instance is what the
 app is told on the state characteristic:
 
 | Instance | Reported | Reached from |
@@ -73,6 +74,7 @@ app is told on the state characteristic:
 | `openState` | `DOOR_STATE_OPEN` (2) | `OpeningState` ran to completion |
 | `closedState` | `DOOR_STATE_CLOSED` (3) | `ClosingState` ran to completion |
 | `pausedState` | `DOOR_STATE_PAUSED` (4) | BLE command '3' during a travel |
+| `timeoutState` | `DOOR_STATE_TIMEOUT` (7) | travel ran past `MAX_TRAVEL_MS` |
 
 **Actions**:
 - Motor stopped
@@ -103,14 +105,15 @@ app is told on the state characteristic:
 **During execution**:
 - Read gyroscope (100ms period)
 - Calculate total rotation: `|x| + |y| + |z|`
-- If rotation > `VZ_TH_MOVE` (6 deg/s) → reset timer
-- If no movement for > 1 second → end-of-travel detected
+- If rotation > `moveThreshold` (6.0 deg/s by default) → reset timer
+- If no movement for > `stopTimeoutMs` → end-of-travel detected
 
 **Exit actions**:
 - Stop motor
 
 **Transitions**:
-- 1s timeout without movement → `openState`
+- No movement for `stopTimeoutMs` → `openState`
+- More than `MAX_TRAVEL_MS` since the travel began → `timeoutState`
 - BLE command '1' → `ClosingState` (manual reversal)
 - BLE command '3' → `pausedState` (emergency stop)
 
@@ -123,7 +126,8 @@ app is told on the state characteristic:
 **Actions**: Identical to `OpeningState` but reversed rotation direction
 
 **Transitions**:
-- 1s timeout without movement → `closedState`
+- No movement for `stopTimeoutMs` → `closedState`
+- More than `MAX_TRAVEL_MS` since the travel began → `timeoutState`
 - BLE command '0' → `OpeningState` (manual reversal)
 - BLE command '3' → `pausedState` (emergency stop)
 
@@ -133,11 +137,23 @@ app is told on the state characteristic:
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `VZ_TH` | 2.0 deg/s | Manual movement detection threshold (currently unused) |
-| `VZ_TH_MOVE` | 6.0 deg/s | Motor movement detection threshold |
 | `LOOP_TIME_MS` | 100 ms | State processing period |
-| **No-movement timeout** | 1000 ms | Delay before stop if no movement detected |
+| `MAX_TRAVEL_MS` | 30000 ms | Absolute cap on one travel — see [Travel Cap](#2-travel-cap-max_travel_ms) |
 | **Motor startup delay** | 500 ms | Wait time after motor start |
+
+Settable from the app over characteristic `...0007`, stored in flash, clamped to the
+bounds shown:
+
+| Setting | Default | Range | Description |
+|---------|---------|-------|-------------|
+| `moveThreshold` | 6.0 deg/s | 1.0 – 50.0 | What counts as the door rotating |
+| `stopTimeoutMs` | 1000 ms | 200 – 5000 | No rotation for this long ends the travel |
+| `speed` | 255 | 5 – 255 | Motor PWM duty |
+| `reversed` | 0 | 0 / 1 | Motor wired the other way round |
+
+> These two govern when a travel is called finished, and nothing else stops the motor in
+> normal operation. Set badly they can keep it running indefinitely, which is what
+> [`MAX_TRAVEL_MS`](#2-travel-cap-max_travel_ms) exists to catch.
 
 ---
 
@@ -147,8 +163,8 @@ app is told on the state characteristic:
 
 Since the door rotates, the gyroscope detects angular movement. When the door reaches its end stop:
 1. Rotation stops abruptly
-2. Gyroscope drops below `VZ_TH_MOVE` threshold
-3. After 1 second without movement → end-of-travel confirmed
+2. Gyroscope drops below the `moveThreshold` setting
+3. After `stopTimeoutMs` without movement → end-of-travel confirmed
 4. Motor automatically stopped
 
 ### Total Rotation Calculation
@@ -168,10 +184,9 @@ We use the sum of absolute values from all 3 axes to detect any rotation, regard
 | Characteristic | UUID suffix | Properties | Payload |
 |----------------|-------------|------------|---------|
 | Commands | `...0002` | Write | 1 byte, **ASCII** |
-| Speed | `...0003` | Read, Write, Notify | 1 byte, raw |
 | Name | `...0004` | Read, Write | up to 29 chars |
 | State | `...0005` | Read, Notify | 1 byte, raw enum |
-| Reverse | `...0006` | Read, Write | 1 byte, 0 or 1 |
+| Settings | `...0007` | Read, Write, Notify | 6 bytes, big-endian |
 
 Note the asymmetry: commands are ASCII characters, everything else is raw bytes. The
 commands are kept in ASCII because they read directly in the serial logs.
@@ -182,7 +197,7 @@ commands are kept in ASCII because they read directly in the serial logs.
 |---------|------------|--------|
 | Open | `'0'` (48) | Start opening |
 | Close | `'1'` (49) | Start closing |
-| Refresh | `'2'` (50) | Push current motor speed **and** current state |
+| Refresh | `'2'` (50) | Push the whole settings block **and** the current state |
 | Pause | `'3'` (51) | Stop the motor where it is → `pausedState` |
 
 ### State (`...0005`)
@@ -201,13 +216,30 @@ current state right after connecting: that is what `'2'` is for.
 | 4 | `DOOR_STATE_PAUSED` | stopped part-way by a pause command |
 | 5 | `DOOR_STATE_OPENING` | opening in progress |
 | 6 | `DOOR_STATE_CLOSING` | closing in progress |
+| 7 | `DOOR_STATE_TIMEOUT` | travel cut short by the safety cap, position unknown |
 
-### Reverse (`...0006`)
+### Settings (`...0007`)
 
-Set when the motor is wired the other way round, so that Open opens rather than closes.
-Stored in flash (`reversed`) because it describes the installation, not the session, and
-applied in `Motor_Move()` — the single place both `OpeningState` and `ClosingState` go
-through. The board normalises anything non-zero to 1 and echoes the value back.
+Every persistent setting travels together, as one big-endian block:
+
+| Bytes | Field | Meaning |
+|-------|-------|---------|
+| `[0]` | `speed` | motor PWM duty, 5–255 |
+| `[1]` | `reversed` | 1 when the motor is wired the other way round |
+| `[2:3]` | `stopTimeoutMs` | no rotation for this long ends the travel |
+| `[4:5]` | `moveThreshold` | what counts as rotation, in tenths of a °/s |
+
+One characteristic rather than one per setting: adding a parameter costs a field and two
+lines of coding, instead of a characteristic, a write handler, a storage pair and a read
+on the app side — in both board branches.
+
+The block is written whole, so a partial write is refused rather than applied half way.
+Each setter clamps to the bounds in `storage_hal.h`, and the board notifies the stored
+block afterwards, so the app displays what actually took effect rather than what it sent.
+
+`reversed` is applied in `Motor_Move()`, the single place both `OpeningState` and
+`ClosingState` go through. `stopTimeoutMs` and `moveThreshold` govern the end-of-travel
+detection described above — see the safety note there.
 
 ### Name (`...0004`)
 
@@ -222,12 +254,36 @@ have been truncated. This is what lets the app tell several boards apart.
 ## Safety Features
 
 ### 1. Blockage Protection
-If the door is blocked (obstacle, end stop), the gyroscope no longer detects movement → stop after 1s
+If the door is blocked (obstacle, end stop), the gyroscope no longer detects movement →
+stop after `stopTimeoutMs`
 
-### 2. Emergency Stop
+### 2. Travel Cap (`MAX_TRAVEL_MS`)
+
+The backstop that holds when stop detection does not. Blockage protection above depends on
+`moveThreshold` and `stopTimeoutMs`, and **both are settable from the app**, so both can be
+set to values that never end a travel — a threshold below the gyroscope's noise floor makes
+noise look like movement, the timer is rearmed on every iteration and the motor keeps
+pushing the door against its stop. Nothing else would catch it: there is no motor current
+measurement (see [Future Improvements](#future-improvements)).
+
+`OpeningState` and `ClosingState` therefore each compare `millis() - travel_start` against
+`MAX_TRAVEL_MS` **before** looking at the no-movement timer, and hand over to
+`timeoutState` when it is exceeded. `travel_start` is set in the `enter()` of both states,
+so the cap counts from the moment the motor started, not from the last movement seen.
+
+It reports `DOOR_STATE_TIMEOUT` and not `OPEN` or `CLOSED`, because reaching it means the
+travel did not complete normally and the door's position is unknown. The app shows
+"Arrêt de sécurité".
+
+`MAX_TRAVEL_MS` is a compile-time constant on purpose. It is not exposed over BLE: a
+safety limit the app can raise is not a safety limit. Set it comfortably above the longest
+normal travel — if it fires during ordinary use, the value is too low, not the door too
+slow.
+
+### 3. Emergency Stop
 A BLE command can stop the motor at any time by changing state
 
-### 3. No Unintended Movement
+### 4. No Unintended Movement
 The system requires an explicit BLE command to start, it never activates automatically
 
 ---
@@ -273,7 +329,7 @@ constant vector that only has to be observed once:
       flash (3 floats), then use `dot(reading, reference) > 0` to tell which way the
       door is turning. Mounting-, hinge- and swing-agnostic, one dot product per
       iteration.
-- [ ] Bootstrap it from the reverse setting (`...0006`). The board cannot check on its
+- [ ] Bootstrap it from the `reversed` setting (`...0007`). The board cannot check on its
       own that the travel it is learning from really was an opening: all it knows is
       that it powered the motor in the direction it calls "open", and on a mis-wired
       motor that direction closes the door. It would then store a closing vector

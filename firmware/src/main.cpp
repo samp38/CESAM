@@ -5,9 +5,19 @@
 #include "storage_hal.h"
 #include "motor_control.h"
 
-#define VZ_TH  2.0f
-#define VZ_TH_MOVE  6.0f
+// VZ_TH_MOVE and the 1 s no-movement timeout now live in flash as settings, reachable
+// from the app - see DEFAULT_MOVE_THRESHOLD and DEFAULT_STOP_TIMEOUT_MS in storage_hal.h
 #define LOOP_TIME_MS 100
+
+// Absolute cap on a single travel, independent of the stop-detection settings.
+//
+// The no-movement timeout is the only thing that normally stops the motor, and both of
+// the values it depends on are about to become settable from the app. A threshold set
+// too low makes gyroscope noise look like movement, the timer is rearmed forever and the
+// motor pushes the door against its stop until a command arrives - there is no current
+// measurement to catch it. This is the backstop, not a normal exit: reaching it means
+// something is wrong, so it reports its own state rather than OPEN or CLOSED.
+#define MAX_TRAVEL_MS 30000
 
 //****************************************************** STATE MACHINE ******************************************************
 
@@ -31,7 +41,7 @@ public:
     virtual uint8_t id() const override { return DOOR_STATE_STARTUP; }
 };
 
-// The door at rest. The four instances below differ only by what they report to the app,
+// The door at rest. The five instances below differ only by what they report to the app,
 // so they share one class: the state the machine transitions to *is* the reason it
 // stopped, and there is no separate field to keep in sync.
 class RestingState : public State {
@@ -71,6 +81,7 @@ RestingState unknownState(DOOR_STATE_UNKNOWN);
 RestingState openState(DOOR_STATE_OPEN);
 RestingState closedState(DOOR_STATE_CLOSED);
 RestingState pausedState(DOOR_STATE_PAUSED);
+RestingState timeoutState(DOOR_STATE_TIMEOUT);
 OpeningState openingState;
 ClosingState closingState;
 
@@ -134,11 +145,14 @@ State* RestingState::run() {
 
 
 unsigned long movement_timer;
+unsigned long travel_start;   // when the current travel began, for MAX_TRAVEL_MS
+
 void OpeningState::enter() {
     Serial.println("OpeningState::enter");
     Motor_Move(0, Storage_GetSpeed());
     delay(500);
     movement_timer = millis();
+    travel_start = movement_timer;
 }
 
 State* OpeningState::run() {
@@ -151,11 +165,16 @@ State* OpeningState::run() {
     if (IMU_AccelerometerAvailable()) { //testing the availability of IMU data. Due to a known issue on Arduino Nano 33 BLE Rev 2 (the Gyroscope available flag stays FALSE), we test here the acceleration available flag.
         IMU_ReadGyroscope(x, y, z);
         float total_rot = abs(x) + abs(y) + abs(z);
-        if(total_rot > VZ_TH_MOVE) {
+        // the threshold is stored in tenths of a degree per second
+        if(total_rot > Storage_GetMoveThreshold() / 10.0f) {
             movement_timer = millis();
         }
     }
-    if (millis() - movement_timer > 1000) {
+    if (millis() - travel_start > MAX_TRAVEL_MS) {
+        Serial.println("OpeningState: travel cap reached, stopping");
+        return &timeoutState;
+    }
+    if (millis() - movement_timer > Storage_GetStopTimeoutMs()) {
         // the door stopped turning, so the opening travel ran to completion
         return &openState;
     }
@@ -172,6 +191,7 @@ void ClosingState::enter() {
     Motor_Move(1, Storage_GetSpeed());
     delay(500);
     movement_timer = millis();
+    travel_start = movement_timer;
 }
 
 State* ClosingState::run() {
@@ -184,11 +204,16 @@ State* ClosingState::run() {
     if (IMU_AccelerometerAvailable()) { //testing the availability of IMU data. Due to a known issue on Arduino Nano 33 BLE Rev 2 (the Gyroscope available flag stays FALSE), we test here the acceleration available flag.
         IMU_ReadGyroscope(x, y, z);
         float total_rot = abs(x) + abs(y) + abs(z);
-        if(total_rot > VZ_TH_MOVE) {
+        // the threshold is stored in tenths of a degree per second
+        if(total_rot > Storage_GetMoveThreshold() / 10.0f) {
             movement_timer = millis();
         }
     }
-    if (millis() - movement_timer > 1000) {
+    if (millis() - travel_start > MAX_TRAVEL_MS) {
+        Serial.println("ClosingState: travel cap reached, stopping");
+        return &timeoutState;
+    }
+    if (millis() - movement_timer > Storage_GetStopTimeoutMs()) {
         // the door stopped turning, so the closing travel ran to completion
         return &closedState;
     }
@@ -208,7 +233,7 @@ State* check_bt_command() {
         return &closingState;
     } else if (cmd == '2') {
         Serial.println("REFRESH");
-        BLE_UpdateSpeed(Storage_GetSpeed());
+        BLE_UpdateSettings();
         // the app has no other way of learning the current state right after connecting:
         // a transition may not happen for a long time
         BLE_UpdateState(_state->id());

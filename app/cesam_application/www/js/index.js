@@ -20,31 +20,6 @@ function stringToBytes(string)
     return array.buffer;
 }
 
-function bitLength(number) {
-  return Math.floor(Math.log2(number)) + 1;
-}
-
-function byteLength(number) {
-  return Math.ceil(bitLength(number) / 8);
-}
-
-function toBytes(number) {
-  if (!Number.isSafeInteger(number)) {
-    throw new Error("Number is out of range");
-  }
-
-  const size = number === 0 ? 0 : byteLength(number);
-  const bytes = new Uint8ClampedArray(size);
-  let x = number;
-  for (let i = (size - 1); i >= 0; i--) {
-    const rightByte = x & 0xff;
-    bytes[i] = rightByte;
-    x = Math.floor(x / 0x100);
-  }
-
-  return bytes.buffer;
-}
-
 function fromBytes(buffer) {
   const bytes = new Uint8ClampedArray(buffer);
   const size = bytes.byteLength;
@@ -62,10 +37,11 @@ var cesam =
 {
     serviceUUID: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
     buttonCharacteristic: '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
-    speedCharacteristic: '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
     nameCharacteristic: '6e400004-b5a3-f393-e0a9-e50e24dcca9e',
     stateCharacteristic: '6e400005-b5a3-f393-e0a9-e50e24dcca9e',
-    reverseCharacteristic: '6e400006-b5a3-f393-e0a9-e50e24dcca9e',
+    // every persistent setting in one 6-byte big-endian block, see BLE_SETTINGS_LEN
+    settingsCharacteristic: '6e400007-b5a3-f393-e0a9-e50e24dcca9e',
+    settingsLength: 6,
 
     scanSeconds: 5,
     maxNameLength: 29, // MAX_NAME_LEN in the firmware: what fits in the scan response
@@ -88,13 +64,25 @@ var cesam =
         3: "Fermée",
         4: "En pause",
         5: "Ouverture…",
-        6: "Fermeture…"
+        6: "Fermeture…",
+        7: "Arrêt de sécurité"
     },
 
     // speed is a single byte, and wraps around instead of saturating
     SPEED_MIN: 5,
     SPEED_MAX: 255,
-    SPEED_STEP: 25
+    SPEED_STEP: 25,
+
+    // the firmware clamps to the same bounds and echoes back what it stored, so these
+    // only keep the app from sending values it knows will be refused
+    TIMEOUT_MIN: 200,
+    TIMEOUT_MAX: 5000,
+    TIMEOUT_STEP: 100,
+
+    // tenths of a degree per second, as stored on the board
+    THRESHOLD_MIN: 10,
+    THRESHOLD_MAX: 500,
+    THRESHOLD_STEP: 5
 };
 
 
@@ -106,9 +94,9 @@ var cesam =
 //   id, name, rssi,
 //   state:     "disconnected" | "connecting" | "connected",
 //   doorState: the last state notified by the board, or null while unknown,
-//   speed:     the last speed notified by the board, or null while unknown,
-//   reversed:  true when the board inverts the motor direction; assumed false until the
-//              board has been read, which matches the firmware default,
+//   settings:  the last settings block read from the board, decoded, or null while
+//              unknown - { speed, reversed, timeoutMs, threshold }, the threshold being
+//              in tenths of a degree per second as the board stores it,
 //   nameDraft: what the user is currently typing in the rename field, or null,
 //   auto:      connect to this board on startup, remembered across app launches,
 //   settingsOpen: whether the settings panel is unfolded - kept here and not in the DOM,
@@ -145,6 +133,22 @@ var app =
         });
         list.on("click", ".speedPlus", function() {
             app.incrementSpeed(app.deviceIdOf(this), cesam.SPEED_STEP);
+        });
+        list.on("click", ".timeoutMinus", function() {
+            app.stepSetting(app.deviceIdOf(this), "timeoutMs", -cesam.TIMEOUT_STEP,
+                            cesam.TIMEOUT_MIN, cesam.TIMEOUT_MAX);
+        });
+        list.on("click", ".timeoutPlus", function() {
+            app.stepSetting(app.deviceIdOf(this), "timeoutMs", cesam.TIMEOUT_STEP,
+                            cesam.TIMEOUT_MIN, cesam.TIMEOUT_MAX);
+        });
+        list.on("click", ".thresholdMinus", function() {
+            app.stepSetting(app.deviceIdOf(this), "threshold", -cesam.THRESHOLD_STEP,
+                            cesam.THRESHOLD_MIN, cesam.THRESHOLD_MAX);
+        });
+        list.on("click", ".thresholdPlus", function() {
+            app.stepSetting(app.deviceIdOf(this), "threshold", cesam.THRESHOLD_STEP,
+                            cesam.THRESHOLD_MIN, cesam.THRESHOLD_MAX);
         });
         list.on("click", ".reverseButton", function() {
             app.toggleReverse(app.deviceIdOf(this));
@@ -272,8 +276,7 @@ var app =
             rssi: undefined,
             state: "disconnected",
             doorState: null,
-            speed: null,
-            reversed: false,
+            settings: null,
             nameDraft: null,
             auto: false,
             settingsOpen: false,
@@ -370,15 +373,15 @@ var app =
             device.status = null;
             app.render();
 
-            // subscribe for incoming data from speed
-            ble.startNotification(deviceId, cesam.serviceUUID, cesam.speedCharacteristic,
+            // subscribe for incoming settings, which the board pushes after every change
+            ble.startNotification(deviceId, cesam.serviceUUID, cesam.settingsCharacteristic,
                 function(data) {
-                    app.onSpeedData(deviceId, data);
+                    app.onSettingsData(deviceId, data);
                 },
                 function(reason) {
-                    console.error("Speed notifications failed on " + deviceId + ": " +
+                    console.error("Settings notifications failed on " + deviceId + ": " +
                                   JSON.stringify(reason));
-                    device.status = "Vitesse non disponible";
+                    device.status = "Réglages non disponibles";
                     app.render();
                 });
 
@@ -407,15 +410,21 @@ var app =
                                   JSON.stringify(reason));
                 });
 
-            // motor wiring is a property of the installation, so it is stored on the
-            // board and only known once read
-            ble.read(deviceId, cesam.serviceUUID, cesam.reverseCharacteristic,
+            // The settings live on the board and are only known once read. Reading rather
+            // than waiting for the refresh command below to be answered, so a folded-open
+            // settings panel fills in even if that command is lost.
+            ble.read(deviceId, cesam.serviceUUID, cesam.settingsCharacteristic,
                 function(data) {
-                    device.reversed = fromBytes(data) !== 0;
-                    app.render();
+                    var settings = app.decodeSettings(data);
+
+                    if(settings)
+                    {
+                        device.settings = settings;
+                        app.render();
+                    }
                 },
                 function(reason) {
-                    console.error("Reverse read failed on " + deviceId + ": " +
+                    console.error("Settings read failed on " + deviceId + ": " +
                                   JSON.stringify(reason));
                 });
 
@@ -477,9 +486,8 @@ var app =
         }
 
         device.state = "disconnected";
-        device.speed = null;
         device.doorState = null;
-        device.reversed = false;
+        device.settings = null;
         device.nameDraft = null;
         app.render();
     },
@@ -497,18 +505,88 @@ var app =
         $("#deviceList > li.device[data-id='" + deviceId + "'] ." + fieldClass).text(text);
     },
 
-    onSpeedData: function(deviceId, data)
+    decodeSettings: function(buffer)
+    {
+        var bytes = new Uint8Array(buffer);
+
+        if(bytes.length !== cesam.settingsLength)
+        {
+            console.error("Settings block of unexpected length: " + bytes.length);
+            return null;
+        }
+
+        return {
+            speed: bytes[0],
+            reversed: bytes[1] !== 0,
+            timeoutMs: (bytes[2] << 8) | bytes[3],
+            threshold: (bytes[4] << 8) | bytes[5]
+        };
+    },
+
+    encodeSettings: function(settings)
+    {
+        return new Uint8Array([
+            settings.speed,
+            settings.reversed ? 1 : 0,
+            (settings.timeoutMs >> 8) & 0xFF,
+            settings.timeoutMs & 0xFF,
+            (settings.threshold >> 8) & 0xFF,
+            settings.threshold & 0xFF
+        ]).buffer;
+    },
+
+    onSettingsData: function(deviceId, data)
     {
         var device = devices[deviceId];
+        var settings = app.decodeSettings(data);
 
-        if(!device)
+        if(!device || !settings)
         {
             return;
         }
 
-        device.speed = fromBytes(data);
-        console.log("Speed received from " + deviceId + " : " + device.speed);
-        app.updateField(deviceId, "deviceSpeed", device.speed);
+        device.settings = settings;
+        console.log("Settings received from " + deviceId + " : " + JSON.stringify(settings));
+
+        // the whole block changed, and the panel holding it may well be folded away, so
+        // there is no single field to poke - redraw only if it is actually on screen
+        if($("#deviceList > li.device[data-id='" + deviceId + "'] .settings-panel").length)
+        {
+            app.render();
+        }
+    },
+
+    // Writes the whole block back: the board applies it as one, clamps each value and
+    // notifies what it stored, which is what ends up displayed.
+    writeSettings: function(deviceId, changes)
+    {
+        var device = devices[deviceId];
+
+        if(!device || device.state !== "connected" || !device.settings)
+        {
+            return;
+        }
+
+        var wanted = {
+            speed: device.settings.speed,
+            reversed: device.settings.reversed,
+            timeoutMs: device.settings.timeoutMs,
+            threshold: device.settings.threshold
+        };
+
+        Object.keys(changes).forEach(function(key) {
+            wanted[key] = changes[key];
+        });
+
+        ble.write(deviceId, cesam.serviceUUID, cesam.settingsCharacteristic,
+            app.encodeSettings(wanted),
+            function() {},
+            function(reason) {
+                console.error("Settings write failed on " + deviceId + ": " +
+                              JSON.stringify(reason));
+                device.status = "Réglage non transmis";
+                app.render();
+            });
     },
 
     onStateData: function(deviceId, data)
@@ -537,39 +615,33 @@ var app =
     },
 
     // Bistable: the button shows the setting currently stored on the board, and one tap
-    // flips it. The board echoes back the normalised value, which is what gets displayed.
+    // flips it. The board notifies back what it stored, which is what gets displayed.
     toggleReverse: function(deviceId)
     {
         var device = devices[deviceId];
 
-        if(!device || device.state !== "connected")
+        if(device && device.settings)
+        {
+            app.writeSettings(deviceId, { reversed: !device.settings.reversed });
+        }
+    },
+
+    // Steps one numeric setting, clamping at the bounds instead of wrapping: unlike the
+    // speed, there is no sensible value on the other side of the range.
+    stepSetting: function(deviceId, key, step, min, max)
+    {
+        var device = devices[deviceId];
+
+        if(!device || !device.settings)
         {
             return;
         }
 
-        var wanted = device.reversed ? 0 : 1;
+        var wanted = device.settings[key] + step;
+        var changes = {};
 
-        // not toBytes(): it encodes 0 as an empty buffer, and the board expects one byte
-        ble.write(deviceId, cesam.serviceUUID, cesam.reverseCharacteristic,
-            new Uint8Array([wanted]).buffer,
-            function() {
-                ble.read(deviceId, cesam.serviceUUID, cesam.reverseCharacteristic,
-                    function(data) {
-                        device.reversed = fromBytes(data) !== 0;
-                        app.render();
-                    },
-                    function() {
-                        // the write went through, so trust it rather than showing nothing
-                        device.reversed = (wanted === 1);
-                        app.render();
-                    });
-            },
-            function(reason) {
-                console.error("Reverse write failed on " + deviceId + ": " +
-                              JSON.stringify(reason));
-                device.status = "Sens moteur non transmis";
-                app.render();
-            });
+        changes[key] = Math.min(max, Math.max(min, wanted));
+        app.writeSettings(deviceId, changes);
     },
 
     rename: function(deviceId)
@@ -639,24 +711,26 @@ var app =
             });
     },
 
-    // Ask the board to send its parameters back over the speed notification
+    // Ask the board to push its settings and its current state back
     refreshParameters: function(deviceId)
     {
         app.sendCommand(deviceId, cesam.CMD_REFRESH);
     },
 
+    // The speed wraps around rather than stopping at the bounds, unlike the other
+    // numeric settings: both ends of its range are usable values.
     incrementSpeed: function(deviceId, incr)
     {
         var device = devices[deviceId];
 
-        if(!device || device.state !== "connected")
+        if(!device || !device.settings)
         {
             return;
         }
 
         // Taken from this device's own state: reading it back from the DOM would pick
         // up whichever board notified last.
-        var speed = (device.speed === null) ? cesam.SPEED_MAX : device.speed;
+        var speed = device.settings.speed;
         var newspeed = speed + incr;
 
         if((incr < 0) && (speed < -incr + 1))
@@ -668,18 +742,7 @@ var app =
             newspeed = cesam.SPEED_MIN;
         }
 
-        ble.write(deviceId, cesam.serviceUUID, cesam.speedCharacteristic,
-            toBytes(newspeed),
-            function() {
-                // Ask hardware to send updated values
-                app.refreshParameters(deviceId);
-            },
-            function(reason) {
-                console.error("Speed write failed on " + deviceId + ": " +
-                              JSON.stringify(reason));
-                device.status = "Vitesse non transmise";
-                app.render();
-            });
+        app.writeSettings(deviceId, { speed: newspeed });
     },
 
     showListMessage: function(message)
@@ -797,29 +860,49 @@ var app =
                       .appendTo(autoRow);
 
         // The rest lives on the board, so it needs a live link to be read or changed
-        if(device.state !== "connected")
+        if(device.state !== "connected" || !device.settings)
         {
             $("<div/>").addClass("row settings-hint")
                        .text("Connectez-vous à la carte pour régler la vitesse, " +
-                             "le sens moteur et le nom.")
+                             "la détection d'arrêt, le sens moteur et le nom.")
                        .appendTo(panel);
             return panel;
         }
 
+        var settings = device.settings;
+
         var speedRow = $("<div/>").addClass("row").appendTo(panel);
         $("<span/>").addClass("label").text("Vitesse : ").appendTo(speedRow);
-        $("<span/>").addClass("deviceSpeed")
-                    .text(device.speed === null ? "NC" : device.speed)
-                    .appendTo(speedRow);
+        $("<span/>").addClass("deviceSpeed").text(settings.speed).appendTo(speedRow);
         $("<button/>").addClass("speedMinus settingButton").text("-").appendTo(speedRow);
         $("<button/>").addClass("speedPlus settingButton").text("+").appendTo(speedRow);
+
+        // Both of these govern when a travel is called finished. MAX_TRAVEL_MS in the
+        // firmware stops the motor whatever they are set to.
+        var timeoutRow = $("<div/>").addClass("row").appendTo(panel);
+        $("<span/>").addClass("label").text("Arrêt après : ").appendTo(timeoutRow);
+        $("<span/>").addClass("deviceTimeout")
+                    .text(settings.timeoutMs + " ms")
+                    .appendTo(timeoutRow);
+        $("<button/>").addClass("timeoutMinus settingButton").text("-").appendTo(timeoutRow);
+        $("<button/>").addClass("timeoutPlus settingButton").text("+").appendTo(timeoutRow);
+
+        var thresholdRow = $("<div/>").addClass("row").appendTo(panel);
+        $("<span/>").addClass("label").text("Seuil mouvement : ").appendTo(thresholdRow);
+        $("<span/>").addClass("deviceThreshold")
+                    .text((settings.threshold / 10).toFixed(1) + " °/s")
+                    .appendTo(thresholdRow);
+        $("<button/>").addClass("thresholdMinus settingButton").text("-")
+                      .appendTo(thresholdRow);
+        $("<button/>").addClass("thresholdPlus settingButton").text("+")
+                      .appendTo(thresholdRow);
 
         var reverseRow = $("<div/>").addClass("row").appendTo(panel);
         $("<span/>").addClass("label").text("Sens moteur : ").appendTo(reverseRow);
         $("<button/>").addClass("reverseButton")
-                      .toggleClass("on", device.reversed)
-                      .attr("aria-pressed", device.reversed ? "true" : "false")
-                      .text(device.reversed ? "Inversé" : "Normal")
+                      .toggleClass("on", settings.reversed)
+                      .attr("aria-pressed", settings.reversed ? "true" : "false")
+                      .text(settings.reversed ? "Inversé" : "Normal")
                       .appendTo(reverseRow);
 
         var nameRow = $("<div/>").addClass("row").appendTo(panel);

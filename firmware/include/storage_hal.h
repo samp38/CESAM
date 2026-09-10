@@ -15,6 +15,22 @@
 #define DEFAULT_NAME_PREFIX "CESAM"
 #define DEFAULT_REVERSED 0
 
+// How long the door must show no rotation before the travel is called finished, and how
+// much rotation counts as movement, in tenths of a degree per second. Both are settable
+// from the app, and both are clamped: a threshold near zero makes noise look like
+// movement and the travel would never end on its own. MAX_TRAVEL_MS in main.cpp is the
+// backstop if they are set to a combination that still never triggers.
+#define DEFAULT_STOP_TIMEOUT_MS 1000
+#define MIN_STOP_TIMEOUT_MS      200
+#define MAX_STOP_TIMEOUT_MS     5000
+
+#define DEFAULT_MOVE_THRESHOLD 60   // 6.0 deg/s, the value VZ_TH_MOVE used to hold
+#define MIN_MOVE_THRESHOLD     10   // 1.0 deg/s, below which gyro noise dominates
+// 50.0 deg/s. A door swinging 90 degrees in three seconds turns at about 30 deg/s, so
+// anything above this never sees the door move at all and the travel would just end
+// after stopTimeoutMs every time.
+#define MAX_MOVE_THRESHOLD     500
+
 // The name is advertised in the scan response, whose payload is 31 bytes: one length
 // byte and one type byte precede it, so 29 characters are all that fit.
 #define MAX_NAME_LEN 29
@@ -27,6 +43,8 @@ typedef struct {
   char pref_doorName[64];
   uint8_t speed;  // ← uint8_t au lieu de int (1 byte explicite)
   uint8_t reversed;  // motor wired the other way round: swap the two directions
+  uint16_t stopTimeoutMs;
+  uint16_t moveThreshold;  // tenths of a degree per second
 } flashPrefs;
 
 // Public API
@@ -40,8 +58,20 @@ const char* Storage_GetName();
 void Storage_SetName(const char* name);
 uint8_t Storage_GetReversed();
 void Storage_SetReversed(uint8_t reversed);
+uint16_t Storage_GetStopTimeoutMs();
+void Storage_SetStopTimeoutMs(uint16_t ms);
+uint16_t Storage_GetMoveThreshold();
+void Storage_SetMoveThreshold(uint16_t tenths);
 void Storage_Process();
 void Storage_PrintPrefs();
+
+// Keeps a value the app sent inside the range the firmware can work with. The clamped
+// value is what gets stored and echoed back, so the app shows what actually took effect.
+static uint16_t Storage_Clamp(uint16_t value, uint16_t low, uint16_t high) {
+    if (value < low)  { return low; }
+    if (value > high) { return high; }
+    return value;
+}
 
 // Both supported boards are nRF52840, so this is board-independent.
 //
@@ -63,6 +93,17 @@ static void Storage_EnsureName(char* name, size_t size) {
     if (name[0] == '\0') {
         Storage_DefaultName(name, size);
     }
+}
+
+// Applied to whatever came back from flash, before anything uses it. A record written by
+// an older firmware, or a partial read, would otherwise put out-of-range values straight
+// into the stop detection.
+static void Storage_EnsurePrefs(flashPrefs* prefs) {
+    Storage_EnsureName(prefs->pref_doorName, sizeof(prefs->pref_doorName));
+    prefs->stopTimeoutMs = Storage_Clamp(prefs->stopTimeoutMs,
+                                         MIN_STOP_TIMEOUT_MS, MAX_STOP_TIMEOUT_MS);
+    prefs->moveThreshold = Storage_Clamp(prefs->moveThreshold,
+                                         MIN_MOVE_THRESHOLD, MAX_MOVE_THRESHOLD);
 }
 
 // Implementation
@@ -92,7 +133,7 @@ bool Storage_ReadPrefs() {
     int rc = myFlashPrefs.readPrefs(&globalPrefs, sizeof(globalPrefs));
     if (rc == FDS_SUCCESS) {
         Serial.println("Storage read SUCCESS");
-        Storage_EnsureName(globalPrefs.pref_doorName, sizeof(globalPrefs.pref_doorName));
+        Storage_EnsurePrefs(&globalPrefs);
         Storage_PrintPrefs();
         return true;
     }
@@ -131,6 +172,8 @@ bool Storage_WritePrefs() {
 void Storage_SetDefaults() {
     globalPrefs.speed = DEFAULT_SPEED;
     globalPrefs.reversed = DEFAULT_REVERSED;
+    globalPrefs.stopTimeoutMs = DEFAULT_STOP_TIMEOUT_MS;
+    globalPrefs.moveThreshold = DEFAULT_MOVE_THRESHOLD;
     Storage_DefaultName(globalPrefs.pref_doorName, sizeof(globalPrefs.pref_doorName));
 }
 
@@ -168,6 +211,30 @@ void Storage_SetReversed(uint8_t reversed) {
     Serial.print("Storage_SetReversed called with: ");
     Serial.println(reversed);
     globalPrefs.reversed = reversed ? 1 : 0;
+    write_pending = true;
+    last_write_time = millis();
+}
+
+uint16_t Storage_GetStopTimeoutMs() {
+    return globalPrefs.stopTimeoutMs;
+}
+
+void Storage_SetStopTimeoutMs(uint16_t ms) {
+    globalPrefs.stopTimeoutMs = Storage_Clamp(ms, MIN_STOP_TIMEOUT_MS, MAX_STOP_TIMEOUT_MS);
+    Serial.print("Storage_SetStopTimeoutMs stored: ");
+    Serial.println(globalPrefs.stopTimeoutMs);
+    write_pending = true;
+    last_write_time = millis();
+}
+
+uint16_t Storage_GetMoveThreshold() {
+    return globalPrefs.moveThreshold;
+}
+
+void Storage_SetMoveThreshold(uint16_t tenths) {
+    globalPrefs.moveThreshold = Storage_Clamp(tenths, MIN_MOVE_THRESHOLD, MAX_MOVE_THRESHOLD);
+    Serial.print("Storage_SetMoveThreshold stored: ");
+    Serial.println(globalPrefs.moveThreshold);
     write_pending = true;
     last_write_time = millis();
 }
@@ -213,7 +280,7 @@ bool Storage_ReadPrefs() {
         file.close();
         if (readlen == sizeof(globalPrefs)) {
             Serial.println("Storage read SUCCESS");
-            Storage_EnsureName(globalPrefs.pref_doorName, sizeof(globalPrefs.pref_doorName));
+            Storage_EnsurePrefs(&globalPrefs);
             Storage_PrintPrefs();
             return true;
         }
@@ -241,6 +308,8 @@ bool Storage_WritePrefs() {
 void Storage_SetDefaults() {
     globalPrefs.speed = DEFAULT_SPEED;
     globalPrefs.reversed = DEFAULT_REVERSED;
+    globalPrefs.stopTimeoutMs = DEFAULT_STOP_TIMEOUT_MS;
+    globalPrefs.moveThreshold = DEFAULT_MOVE_THRESHOLD;
     Storage_DefaultName(globalPrefs.pref_doorName, sizeof(globalPrefs.pref_doorName));
 }
 
@@ -277,6 +346,30 @@ void Storage_SetReversed(uint8_t reversed) {
     Serial.print("Storage_SetReversed called with: ");
     Serial.println(reversed);
     globalPrefs.reversed = reversed ? 1 : 0;
+    write_pending = true;
+    last_write_time = millis();
+}
+
+uint16_t Storage_GetStopTimeoutMs() {
+    return globalPrefs.stopTimeoutMs;
+}
+
+void Storage_SetStopTimeoutMs(uint16_t ms) {
+    globalPrefs.stopTimeoutMs = Storage_Clamp(ms, MIN_STOP_TIMEOUT_MS, MAX_STOP_TIMEOUT_MS);
+    Serial.print("Storage_SetStopTimeoutMs stored: ");
+    Serial.println(globalPrefs.stopTimeoutMs);
+    write_pending = true;
+    last_write_time = millis();
+}
+
+uint16_t Storage_GetMoveThreshold() {
+    return globalPrefs.moveThreshold;
+}
+
+void Storage_SetMoveThreshold(uint16_t tenths) {
+    globalPrefs.moveThreshold = Storage_Clamp(tenths, MIN_MOVE_THRESHOLD, MAX_MOVE_THRESHOLD);
+    Serial.print("Storage_SetMoveThreshold stored: ");
+    Serial.println(globalPrefs.moveThreshold);
     write_pending = true;
     last_write_time = millis();
 }
