@@ -1,5 +1,15 @@
 <?xml version='1.0' encoding='utf-8'?>
-<widget id="fr.inria.cesam" version="0.6.0" xmlns="http://www.w3.org/ns/widgets" xmlns:android="http://schemas.android.com/apk/res/android" xmlns:cdv="http://cordova.apache.org/ns/1.0">
+<!-- android-versionCode is an attribute of <widget>, not a <preference>: cordova reads
+     it with getAttribute(). Pinned, and no longer derived from the version beside it.
+
+     Cordova would otherwise compute MAJOR*10000 + MINOR*100 + PATCH, so 0.6.0 gives 600
+     - below the 10000 that 1.0.0 produced and that is already installed on phones, and
+     Android refuses to install a lower code. Hence the +10000 offset: 0.7.0 becomes
+     10700, and so on.
+
+     It must therefore be bumped by hand at every release, and only ever upwards. Watch
+     out when reaching 1.x: 1.0.0 would derive 10000 and be a downgrade. -->
+<widget id="fr.inria.cesam" version="0.6.0" android-versionCode="10600" xmlns="http://www.w3.org/ns/widgets" xmlns:android="http://schemas.android.com/apk/res/android" xmlns:cdv="http://cordova.apache.org/ns/1.0">
     <name>CESAM</name>
     <description>
         CESAM  application
@@ -10,15 +20,6 @@
     <icon src="www/img/logoCESAM.png" />
     <content src="index.html" />
     <access origin="*" />
-    <!-- Pinned, and no longer derived from the version above.
-         Cordova computes the code as MAJOR*10000 + MINOR*100 + PATCH, so 0.6.0 would
-         give 600 - below the 10000 that 1.0.0 produced and that is already installed on
-         phones. Android refuses to install a lower code, so the value carries a +10000
-         offset: 0.7.0 becomes 10700, and so on.
-
-         It must therefore be bumped by hand at every release, and only ever upwards.
-         Watch out when reaching 1.x: 1.0.0 would derive 10000 and be a downgrade. -->
-    <preference name="android-versionCode" value="10600" />
     <preference name="android-minSdkVersion" value="24" />
     <preference name="android-targetSdkVersion" value="34" />
     <preference name="android-compileSdkVersion" value="34" />
