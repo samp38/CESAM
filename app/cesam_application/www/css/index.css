@@ -260,7 +260,8 @@ button:active{
     text-align: center;
 }
 
-#deviceList .device-panel .row {
+#deviceList .device-panel .row,
+#deviceList .settings-panel .row {
     margin-top: 2%;
 }
 
@@ -268,8 +269,26 @@ button:active{
     width: 12em;
 }
 
-#deviceList .auto-row {
-    margin-top: 0.6em;
+#deviceList .settingsToggle {
+    width: auto;
+    padding: 0 1em;
+    margin: 3% 0 0 0;
+    background-color: transparent;
+    color: #EEE;
+    opacity: 0.75;
+}
+
+#deviceList .settings-panel {
+    margin: 2% 0 0 0;
+    max-width: 100%;
+    text-align: center;
+    background-color: #262626;
+}
+
+#deviceList .settings-hint {
+    margin-top: 2%;
+    font-style: italic;
+    opacity: 0.7;
 }
 
 #deviceList .autoButton {
@@ -278,17 +297,17 @@ button:active{
 
 /* bistable: the accent background is what says the setting is active */
 #deviceList .autoButton.on,
-#deviceList .device-panel .reverseButton.on {
+#deviceList .reverseButton.on {
     background-color: #c46310;
     color: #FFF;
     font-weight: bold;
 }
 
-#deviceList .device-panel .reverseButton {
+#deviceList .reverseButton {
     width: 6em;
 }
 
-#deviceList .device-panel .nameInput {
+#deviceList .nameInput {
     width: 9em;
     padding: 0.3em;
     border: none;

@@ -111,6 +111,8 @@ var cesam =
 //              board has been read, which matches the firmware default,
 //   nameDraft: what the user is currently typing in the rename field, or null,
 //   auto:      connect to this board on startup, remembered across app launches,
+//   settingsOpen: whether the settings panel is unfolded - kept here and not in the DOM,
+//              because render() rebuilds the whole list and would otherwise fold it back,
 //   status:    a short message shown under the device name, or null
 // }
 var devices = {};
@@ -152,6 +154,15 @@ var app =
         });
         list.on("click", ".autoButton", function() {
             app.toggleAuto(app.deviceIdOf(this));
+        });
+        list.on("click", ".settingsToggle", function() {
+            var device = devices[app.deviceIdOf(this)];
+
+            if(device)
+            {
+                device.settingsOpen = !device.settingsOpen;
+                app.render();
+            }
         });
         list.on("click", ".disconnectButton", function() {
             app.disconnect(app.deviceIdOf(this));
@@ -265,6 +276,7 @@ var app =
             reversed: false,
             nameDraft: null,
             auto: false,
+            settingsOpen: false,
             status: null
         };
     },
@@ -439,13 +451,10 @@ var app =
         }
 
         // The plugin does not call the disconnect callback when the app is the one
-        // closing the connection, so the state is updated here. Disconnecting also stops
-        // the automatic reconnection, which the flag alone would not make obvious: it
-        // says the board comes back at the next startup, not that something is retrying.
-        if(device.auto)
-        {
-            device.status = "Reconnexion au prochain démarrage";
-        }
+        // closing the connection, so the state is updated here. Any message left over
+        // from an earlier drop goes too: nothing is being attempted any more, and the
+        // auto-connect flag has its own place in the settings panel.
+        device.status = null;
 
         ble.disconnect(deviceId,
             function() {
@@ -478,18 +487,14 @@ var app =
     // Update a single field of one device rather than redrawing. A notification can land
     // while the user is pressing a button or typing a name, and a full redraw would
     // rebuild the element under their finger - swallowing the tap, or losing the text.
+    //
+    // A missing field is not an error and must not fall back to a redraw: the speed lives
+    // in the settings panel, which is folded away most of the time, and redrawing on every
+    // notification is exactly what this avoids. The value is held in the device state and
+    // shows up whenever the panel is next rendered.
     updateField: function(deviceId, fieldClass, text)
     {
-        var field = $("#deviceList > li.device[data-id='" + deviceId + "'] ." + fieldClass);
-
-        if(field.length)
-        {
-            field.text(text);
-        }
-        else
-        {
-            app.render();
-        }
+        $("#deviceList > li.device[data-id='" + deviceId + "'] ." + fieldClass).text(text);
     },
 
     onSpeedData: function(deviceId, data)
@@ -737,21 +742,22 @@ var app =
                     .text(status)
                     .appendTo(header);
 
-        // Outside .device-header, whose click connects, and outside the command panel,
-        // which only exists while connected: a waiting board must show its flag too, and
-        // be able to have it cleared.
-        var autoRow = $("<div/>").addClass("row auto-row");
-        $("<span/>").addClass("label").text("Connexion auto : ").appendTo(autoRow);
-        $("<button/>").addClass("autoButton")
-                      .toggleClass("on", device.auto)
-                      .attr("aria-pressed", device.auto ? "true" : "false")
-                      .text(device.auto ? "Oui" : "Non")
-                      .appendTo(autoRow);
-        item.append(autoRow);
-
         if(device.state === "connected")
         {
             item.append(app.renderCommandPanel(device));
+        }
+
+        // Settings are folded away by default: they are set once per installation, while
+        // the buttons above are used every day. The toggle stays available even when
+        // disconnected, so a board waiting out of range can have its auto flag cleared.
+        $("<button/>").addClass("settingsToggle")
+                      .attr("aria-expanded", device.settingsOpen ? "true" : "false")
+                      .text(device.settingsOpen ? "Réglages ▴" : "Réglages ▾")
+                      .appendTo(item);
+
+        if(device.settingsOpen)
+        {
+            item.append(app.renderSettingsPanel(device));
         }
 
         return item;
@@ -770,6 +776,35 @@ var app =
         $("<span/>").addClass("deviceState")
                     .text(app.doorStateLabel(device))
                     .appendTo(stateRow);
+
+        $("<button/>").addClass("disconnectButton").text("Déconnecter").appendTo(panel);
+
+        return panel;
+    },
+
+    renderSettingsPanel: function(device)
+    {
+        var panel = $("<div/>").addClass("command settings-panel");
+
+        // This one works whether or not the board is reachable - it is a preference of
+        // the app, not a value stored on the board.
+        var autoRow = $("<div/>").addClass("row").appendTo(panel);
+        $("<span/>").addClass("label").text("Connexion auto : ").appendTo(autoRow);
+        $("<button/>").addClass("autoButton")
+                      .toggleClass("on", device.auto)
+                      .attr("aria-pressed", device.auto ? "true" : "false")
+                      .text(device.auto ? "Oui" : "Non")
+                      .appendTo(autoRow);
+
+        // The rest lives on the board, so it needs a live link to be read or changed
+        if(device.state !== "connected")
+        {
+            $("<div/>").addClass("row settings-hint")
+                       .text("Connectez-vous à la carte pour régler la vitesse, " +
+                             "le sens moteur et le nom.")
+                       .appendTo(panel);
+            return panel;
+        }
 
         var speedRow = $("<div/>").addClass("row").appendTo(panel);
         $("<span/>").addClass("label").text("Vitesse : ").appendTo(speedRow);
@@ -795,8 +830,6 @@ var app =
                      .val(device.nameDraft === null ? device.name : device.nameDraft)
                      .appendTo(nameRow);
         $("<button/>").addClass("renameButton settingButton").text("OK").appendTo(nameRow);
-
-        $("<button/>").addClass("disconnectButton").text("Déconnecter").appendTo(panel);
 
         return panel;
     }
