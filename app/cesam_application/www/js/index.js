@@ -70,6 +70,9 @@ var cesam =
     scanSeconds: 5,
     maxNameLength: 29, // MAX_NAME_LEN in the firmware: what fits in the scan response
 
+    // boards to connect to on startup, as { id: last known name }
+    storageKey: "cesam.autoConnect",
+
     CMD_OPEN: "0",
     CMD_CLOSE: "1",
     CMD_REFRESH: "2",
@@ -107,6 +110,7 @@ var cesam =
 //   reversed:  true when the board inverts the motor direction; assumed false until the
 //              board has been read, which matches the firmware default,
 //   nameDraft: what the user is currently typing in the rename field, or null,
+//   auto:      connect to this board on startup, remembered across app launches,
 //   status:    a short message shown under the device name, or null
 // }
 var devices = {};
@@ -146,6 +150,9 @@ var app =
         list.on("click", ".renameButton", function() {
             app.rename(app.deviceIdOf(this));
         });
+        list.on("click", ".autoButton", function() {
+            app.toggleAuto(app.deviceIdOf(this));
+        });
         list.on("click", ".disconnectButton", function() {
             app.disconnect(app.deviceIdOf(this));
         });
@@ -172,7 +179,94 @@ var app =
 
     onDeviceReady: function()
     {
+        // Boards marked for auto-connect are listed straight away, before any scan, so
+        // that one out of range still shows up - ble.autoConnect waits for it forever.
+        var known = app.loadKnown();
+
+        Object.keys(known).forEach(function(id) {
+            devices[id] = app.newDevice(id, known[id]);
+            devices[id].auto = true;
+            app.connect(id);
+        });
+
         app.refreshDeviceList();
+    },
+
+    // The set of boards to reconnect to, as { id: last known name }. localStorage throws
+    // in a private window or with site data blocked, so no read or write may be assumed
+    // to work.
+    loadKnown: function()
+    {
+        try
+        {
+            return JSON.parse(localStorage.getItem(cesam.storageKey)) || {};
+        }
+        catch(e)
+        {
+            console.error("Could not read known devices: " + e);
+            return {};
+        }
+    },
+
+    saveKnown: function()
+    {
+        var known = {};
+
+        Object.keys(devices).forEach(function(id) {
+            if(devices[id].auto)
+            {
+                known[id] = devices[id].name;
+            }
+        });
+
+        try
+        {
+            localStorage.setItem(cesam.storageKey, JSON.stringify(known));
+        }
+        catch(e)
+        {
+            console.error("Could not save known devices: " + e);
+        }
+    },
+
+    toggleAuto: function(deviceId)
+    {
+        var device = devices[deviceId];
+
+        if(!device)
+        {
+            return;
+        }
+
+        device.auto = !device.auto;
+        app.saveKnown();
+
+        // Turning it on acts right away rather than only at the next startup. Turning it
+        // off leaves the connection alone: the board may well be in use.
+        if(device.auto && device.state === "disconnected")
+        {
+            app.connect(deviceId); // renders
+        }
+        else
+        {
+            app.render();
+        }
+    },
+
+    newDevice: function(id, name)
+    {
+        return {
+            id: id,
+            name: name || "CESAM",
+            rssi: undefined,
+            state: "disconnected",
+            doorState: null,
+            speed: null,
+            reversed: false,
+            nameDraft: null,
+            auto: false,
+            status: null
+        };
     },
 
     deviceIdOf: function(element)
@@ -192,9 +286,11 @@ var app =
         // A connected peripheral is never reported again by ble.scan (the plugin only
         // drops non-connected entries from its cache), so connected devices have to be
         // kept in the list: dropping them here would lose the only handle we have on
-        // them and leave the connection open with no way to close it.
+        // them and leave the connection open with no way to close it. Boards marked for
+        // auto-connect stay too, even out of range - they are the ones the user wants to
+        // see waiting rather than see vanish.
         Object.keys(devices).forEach(function(id) {
-            if(devices[id].state === "disconnected")
+            if(devices[id].state === "disconnected" && !devices[id].auto)
             {
                 delete devices[id];
             }
@@ -230,25 +326,13 @@ var app =
     // CESAM. Filtering on the name again would break as soon as a board is renamed.
     onDiscoverDevice: function(device)
     {
-        if(devices[device.id])
+        if(!devices[device.id])
         {
-            devices[device.id].rssi = device.rssi;
-            devices[device.id].name = device.name || devices[device.id].name;
+            devices[device.id] = app.newDevice(device.id, device.name);
         }
-        else
-        {
-            devices[device.id] = {
-                id: device.id,
-                name: device.name || "CESAM",
-                rssi: device.rssi,
-                state: "disconnected",
-                doorState: null,
-                speed: null,
-                reversed: false,
-                nameDraft: null,
-                status: null
-            };
-        }
+
+        devices[device.id].rssi = device.rssi;
+        devices[device.id].name = device.name || devices[device.id].name;
         app.render();
     },
 
@@ -303,6 +387,7 @@ var app =
             ble.read(deviceId, cesam.serviceUUID, cesam.nameCharacteristic,
                 function(data) {
                     device.name = bytesToString(data);
+                    app.saveKnown();
                     app.render();
                 },
                 function(reason) {
@@ -328,15 +413,20 @@ var app =
         // The third callback is not just a failure callback: the plugin also calls it
         // later on, when the peripheral itself drops the connection. Either way it
         // concerns this device only - it must never tear down the other connections.
+        // It is not called when the app is the one disconnecting, so reaching it always
+        // means the board went away and autoConnect is now waiting for it to come back.
         function onDisconnect(reason)
         {
             console.log("Disconnected from " + deviceId + ": " + JSON.stringify(reason));
-            device.status = (device.state === "connected") ? "Connexion perdue"
-                                                           : "Connexion impossible";
+            device.status = "Connexion perdue, reconnexion…";
             app.disconnected(deviceId);
         }
 
-        ble.connect(deviceId, onConnect, onDisconnect);
+        // autoConnect rather than connect: it never times out, waits for the board to be
+        // in range, and re-establishes the link on its own every time the board goes away
+        // and comes back. Pressing Déconnecter is what stops it. The auto flag is about
+        // something else - whether to do this at startup without being asked.
+        ble.autoConnect(deviceId, onConnect, onDisconnect);
     },
 
     disconnect: function(deviceId)
@@ -349,7 +439,14 @@ var app =
         }
 
         // The plugin does not call the disconnect callback when the app is the one
-        // closing the connection, so the state is updated here.
+        // closing the connection, so the state is updated here. Disconnecting also stops
+        // the automatic reconnection, which the flag alone would not make obvious: it
+        // says the board comes back at the next startup, not that something is retrying.
+        if(device.auto)
+        {
+            device.status = "Reconnexion au prochain démarrage";
+        }
+
         ble.disconnect(deviceId,
             function() {
                 app.disconnected(deviceId);
@@ -496,6 +593,7 @@ var app =
                     function(data) {
                         device.name = bytesToString(data);
                         device.nameDraft = null;
+                        app.saveKnown();
                         app.render();
                     },
                     function() {
@@ -613,7 +711,9 @@ var app =
 
         if(device.state === "connecting")
         {
-            status = "Connexion…";
+            // autoConnect never times out, so a board that has not been seen in a scan
+            // this session may sit here indefinitely: say so rather than imply progress
+            status = (device.rssi === undefined) ? "En attente de la carte…" : "Connexion…";
         }
         else if(device.state === "connected")
         {
@@ -636,6 +736,18 @@ var app =
                               device.state === "connecting" ? "connection" : "")
                     .text(status)
                     .appendTo(header);
+
+        // Outside .device-header, whose click connects, and outside the command panel,
+        // which only exists while connected: a waiting board must show its flag too, and
+        // be able to have it cleared.
+        var autoRow = $("<div/>").addClass("row auto-row");
+        $("<span/>").addClass("label").text("Connexion auto : ").appendTo(autoRow);
+        $("<button/>").addClass("autoButton")
+                      .toggleClass("on", device.auto)
+                      .attr("aria-pressed", device.auto ? "true" : "false")
+                      .text(device.auto ? "Oui" : "Non")
+                      .appendTo(autoRow);
+        item.append(autoRow);
 
         if(device.state === "connected")
         {

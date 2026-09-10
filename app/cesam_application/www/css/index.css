@@ -268,15 +268,24 @@ button:active{
     width: 12em;
 }
 
-/* bistable: the accent background is what says the setting is active */
-#deviceList .device-panel .reverseButton {
-    width: 6em;
+#deviceList .auto-row {
+    margin-top: 0.6em;
 }
 
+#deviceList .autoButton {
+    width: 5em;
+}
+
+/* bistable: the accent background is what says the setting is active */
+#deviceList .autoButton.on,
 #deviceList .device-panel .reverseButton.on {
     background-color: #c46310;
     color: #FFF;
     font-weight: bold;
+}
+
+#deviceList .device-panel .reverseButton {
+    width: 6em;
 }
 
 #deviceList .device-panel .nameInput {
